@@ -13,7 +13,6 @@ tf.random.set_seed(seed)
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--tfrec", type=str, required=True) 
-parser.add_argument("--vocab", type=str, required=True) 
 parser.add_argument("--batch-size", type=int, required=False, default=64) 
 parser.add_argument("--eval-step", type=int, required=False, default=100) 
 parser.add_argument("--save-step", type=int, required=False, default=1000) 
@@ -26,8 +25,6 @@ import json
 tfrec_args = os.path.join(args.tfrec, "ARGS")
 with open(tfrec_args, "r") as f:
   samp_len = json.loads(f.readlines()[-1])["samp_len"]
-
-vocab = [e.strip() for e in open(args.vocab).readlines()]
 
 import types
 import sys
@@ -73,7 +70,7 @@ lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
 opt = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
 
 import model
-m = model.tdnn(len(vocab))
+m = model.convtas()
 
 origins = [val.__spec__.origin for name, val in globals().items() \
   if isinstance(val, types.ModuleType)]
@@ -83,20 +80,10 @@ import shutil
 for origin in origins + [os.path.abspath(__file__)]:
   shutil.copy(origin, args.output)
 
-@tf.function
-def train_step(neg, pos, anc):
+#@tf.function
+def train_step(s1, s2, mix):
   with tf.GradientTape() as tape:
-    _, neg_emb = m((neg, None), training=True)
-    _, pos_emb = m((pos, None), training=True)
-    _, anc_emb = m((anc, None), training=True)
-
-    neg_emb = tf.math.l2_normalize(neg_emb, -1)
-    pos_emb = tf.math.l2_normalize(pos_emb, -1)
-    anc_emb = tf.math.l2_normalize(anc_emb, -1)
-
-    neg_anc = tf.math.reduce_sum(neg_emb * anc_emb, -1)
-    pos_anc = tf.math.reduce_sum(pos_emb * anc_emb, -1)
-    loss = tf.math.maximum(0., neg_anc - pos_anc + 0.5)
+    loss = m((s1, s2, mix), training=True)
     loss = tf.math.reduce_mean(loss)
 
   grads = tape.gradient(loss, m.trainable_weights)
@@ -116,7 +103,7 @@ ckpt = tf.train.Checkpoint(m)
 for idx, data in enumerate(dataset):
   if idx > args.train_step: break
 
-  loss = (train_step(data["neg"], data["pos"], data["anc"]))
+  loss = (train_step(data["s1"], data["s2"], data["mix"]))
   if idx > 0 and idx % args.eval_step == 0:
     logger.info("gstep[{}] loss[{:.2f}] lr[{:.2e}]".format(
       idx, loss, lr_schedule(idx).numpy()))
