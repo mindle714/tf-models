@@ -80,13 +80,14 @@ import shutil
 for origin in origins + [os.path.abspath(__file__)]:
   shutil.copy(origin, args.output)
 
-#@tf.function
+@tf.function
 def train_step(s1, s2, mix):
   with tf.GradientTape() as tape:
     loss = m((s1, s2, mix), training=True)
     loss = tf.math.reduce_mean(loss)
 
   grads = tape.gradient(loss, m.trainable_weights)
+  grads = [tf.clip_by_norm(g, 5.) for g in grads]
   opt.apply_gradients(zip(grads, m.trainable_weights))
   return loss
 
