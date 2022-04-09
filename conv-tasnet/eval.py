@@ -1,14 +1,18 @@
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--ckpt", type=str, required=True) 
-parser.add_argument("--eval-list", type=str, required=True) 
+parser.add_argument("--eval-list", type=str, required=False,
+  default="/home/speech/wsj0/8k_tt_min.list") 
 args = parser.parse_args()
 
 import os
 import sys
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 expdir = os.path.abspath(os.path.dirname(args.ckpt))
 sys.path.insert(0, expdir)
+expname = expdir.split("/")[-1]
+epoch = os.path.basename(args.ckpt).replace(".", "-").split("-")[1]
 
 import model
 if os.path.dirname(model.__file__) != expdir:
@@ -37,18 +41,41 @@ import soundfile
 import tqdm
 
 evals = [e.strip() for e in open(args.eval_list, "r").readlines()]
-evals = evals[:5]
 
-pcount = 0
-for idx, _line in tqdm.tqdm(enumerate(evals), total=len(evals)):
+pcount = 0; snr_tot = 0
+#for idx, _line in tqdm.tqdm(enumerate(evals), total=len(evals)):
+for idx, _line in enumerate(evals):
   if len(_line.split()) != 3:
     warnings.warn("failed to parse {} at line {}".format(_line, idx))
     continue
 
   s1, s2, mix = [soundfile.read(e)[0] for e in _line.split()]
   assert s1.shape[0] == s2.shape[0] and s2.shape[0] == mix.shape[0]
-    
-  out = m((None, None, np.expand_dims(mix, 0)), training=False)
-  soundfile.write("eval-{}-mix.wav".format(idx), mix, 8000)
-  soundfile.write("eval-{}-s1.wav".format(idx), out[0,:,0], 8000)
-  soundfile.write("eval-{}-s2.wav".format(idx), out[0,:,1], 8000)
+
+  mix = np.expand_dims(mix, 0).astype(np.float32)
+  ref = np.concatenate([e[np.newaxis,:,np.newaxis] for e in [s1, s2]], -1)
+  ref = ref.astype(np.float32)
+
+  def pad(pcm, mod=512):
+    if pcm.shape[-1] % mod != 0:
+      pcm = np.concatenate([pcm, np.zeros((1, mod-pcm.shape[-1]%mod))], -1)
+      return pcm
+    return pcm
+
+  hyp = m((None, None, pad(mix)), training=False)
+  _, sort_hyp = model.si_snr(ref, hyp[:,:ref.shape[1],:])
+
+  ref1, ref2 = np.split(ref, 2, -1)
+  hyp1, hyp2 = np.split(sort_hyp, 2, -1)
+
+  snr1, _ = model.si_snr(ref1, hyp1, False)
+  snr2, _ = model.si_snr(ref2, hyp2, False)
+
+  mix = np.expand_dims(mix, -1)
+  snr1_mix, _ = model.si_snr(ref1, mix, False)
+  snr2_mix, _ = model.si_snr(ref2, mix, False)
+  snr = ((snr1 - snr1_mix) + (snr2 - snr2_mix)) / 2.
+
+  snr_tot += np.squeeze(snr)
+
+print("{}-{}\t{}".format(expname, epoch, snr_tot / len(evals)))

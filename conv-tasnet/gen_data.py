@@ -3,6 +3,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--train-list", type=str, required=True) 
 parser.add_argument("--num-chunks", type=int, required=False, default=100)
 parser.add_argument("--samp-len", type=int, required=False, default=32000)
+parser.add_argument("--hop-len", type=int, required=False, default=16000)
 parser.add_argument("--output", type=str, required=True) 
 args = parser.parse_args()
 
@@ -45,7 +46,7 @@ for idx, _list in tqdm.tqdm(enumerate(train_list), total=len(train_list)):
     ignored += 1
     continue
 
-  hop_len = args.samp_len//2
+  hop_len = args.hop_len
   for pcm_idx in range((s1.shape[0]-args.samp_len)//hop_len):
     _s1 = s1[pcm_idx*hop_len : pcm_idx*hop_len+args.samp_len]
     _s2 = s2[pcm_idx*hop_len : pcm_idx*hop_len+args.samp_len]
@@ -69,9 +70,14 @@ for writer in writers:
   writer.close()
 
 args.chunk_lens = chunk_lens
+args.ignored = ignored
 
 with open(args_file, "w") as f:
   f.write(" ".join([sys.executable] + sys.argv))
   f.write("\n")
   f.write(json.dumps(vars(args)))
 os.chmod(args_file, S_IREAD|S_IRGRP|S_IROTH)
+
+import shutil
+for origin in [os.path.abspath(__file__)]:
+  shutil.copy(origin, args.output)

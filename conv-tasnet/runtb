@@ -1,0 +1,25 @@
+#!/usr/bin/bash
+
+USAGE="Usage: $0 -e <exp>"
+EXAMPLE="($0 -e naive)"
+
+unset exps;
+while getopts ":e:" opt; do
+  case $opt in
+    e) exps+=("$OPTARG") ;;
+    ?) echo "$USAGE"; echo "$EXAMPLE"; exit 2 ;;
+  esac
+done
+
+if [ -z ${exps+x} ]; then
+  echo "$USAGE"; echo "$EXAMPLE"; exit 2
+fi
+
+opts=""
+for e in "${exps[@]}"; do
+  if [ -d exps/$e/logs ]; then
+    opts="$opts,$e:exps/$e/logs/"
+  fi
+done
+opts="$(echo $opts | sed 's/^,//g')"
+tensorboard --host 0.0.0.0 --logdir_spec $opts

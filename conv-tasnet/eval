@@ -1,0 +1,15 @@
+#!/usr/bin/bash
+
+expdir=exps/naive3
+
+resdir=results/$(basename $expdir)
+mkdir -p $resdir
+
+for epoch in $(seq 10000 10000 100000); do
+  while true; do
+    if [ -f "$expdir/model-${epoch}.ckpt.data-00000-of-00001" ]; then
+      sleep 30s; break
+    fi
+  done
+  python3 eval.py --ckpt $expdir/model-${epoch}.ckpt >> $resdir/log
+done

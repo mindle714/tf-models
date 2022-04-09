@@ -1,3 +1,6 @@
 8k_tr_min/
 exps/
+results/
 __pycache__/
+*.wav
+*.png

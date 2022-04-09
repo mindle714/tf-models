@@ -13,11 +13,14 @@ tf.random.set_seed(seed)
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--tfrec", type=str, required=True) 
+parser.add_argument("--val-tfrec", type=str, required=False, default=None)
 parser.add_argument("--batch-size", type=int, required=False, default=64) 
 parser.add_argument("--eval-step", type=int, required=False, default=100) 
 parser.add_argument("--save-step", type=int, required=False, default=1000) 
+parser.add_argument("--val-step", type=int, required=False, default=1000) 
 parser.add_argument("--train-step", type=int, required=False, default=30000) 
 parser.add_argument("--begin-lr", type=float, required=False, default=1e-4) 
+parser.add_argument("--val-lr-update", type=float, required=False, default=3) 
 parser.add_argument("--output", type=str, required=True) 
 args = parser.parse_args()
 
@@ -25,6 +28,13 @@ import json
 tfrec_args = os.path.join(args.tfrec, "ARGS")
 with open(tfrec_args, "r") as f:
   samp_len = json.loads(f.readlines()[-1])["samp_len"]
+
+if args.val_tfrec is not None:
+  val_tfrec_args = os.path.join(args.val_tfrec, "ARGS")
+  with open(val_tfrec_args, "r") as f:
+    val_samp_len = json.loads(f.readlines()[-1])["samp_len"]
+  if val_samp_len != samp_len:
+    sys.exit('validation data has sample length {}'.format(val_samp_len))
 
 import types
 import sys
@@ -64,10 +74,16 @@ tfrec_list = glob.glob(os.path.join(args.tfrec, "train-*.tfrecord"))
 dataset = parse_data.gen_train(tfrec_list, samp_len,
   batch_size=args.batch_size, seed=seed)
 
-lr = args.begin_lr
-lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-  lr, decay_steps=1000, decay_rate=0.96, staircase=False)
-opt = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
+val_dataset = None
+if args.val_tfrec is not None:
+  val_tfrec_list = glob.glob(os.path.join(args.val_tfrec, "train-*.tfrecord"))
+  val_dataset = parse_data.gen_val(val_tfrec_list, samp_len,
+    batch_size=args.batch_size, seed=seed)
+
+lr = tf.Variable(args.begin_lr, trainable=False)
+# lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+#   lr, decay_steps=1000, decay_rate=0.96, staircase=False)
+opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
 import model
 m = model.convtas()
@@ -80,15 +96,23 @@ import shutil
 for origin in origins + [os.path.abspath(__file__)]:
   shutil.copy(origin, args.output)
 
-@tf.function
-def train_step(s1, s2, mix):
-  with tf.GradientTape() as tape:
-    loss = m((s1, s2, mix), training=True)
-    loss = tf.math.reduce_mean(loss)
+import datetime
+logdir = os.path.join(args.output, "logs")
+log_writer = tf.summary.create_file_writer(logdir)
+log_writer.set_as_default()
 
-  grads = tape.gradient(loss, m.trainable_weights)
-  grads = [tf.clip_by_norm(g, 5.) for g in grads]
-  opt.apply_gradients(zip(grads, m.trainable_weights))
+@tf.function
+def run_step(step, s1, s2, mix, training=True):
+  with tf.GradientTape() as tape, log_writer.as_default():
+    loss = m((s1, s2, mix), training=training)
+    loss = tf.math.reduce_mean(loss)
+    tf.summary.scalar("loss", loss, step=step)
+
+  if training:
+    grads = tape.gradient(loss, m.trainable_weights)
+    grads = [tf.clip_by_norm(g, 5.) for g in grads]
+    opt.apply_gradients(zip(grads, m.trainable_weights))
+
   return loss
 
 import logging
@@ -101,13 +125,40 @@ fh = logging.FileHandler(logfile)
 logger.addHandler(fh)
 
 ckpt = tf.train.Checkpoint(m)
+prev_val_loss = None; stall_cnt = 0
+
 for idx, data in enumerate(dataset):
   if idx > args.train_step: break
 
-  loss = (train_step(data["s1"], data["s2"], data["mix"]))
+  loss = run_step(tf.cast(idx, tf.int64), 
+    data["s1"], data["s2"], data["mix"])
+  log_writer.flush()
+
   if idx > 0 and idx % args.eval_step == 0:
     logger.info("gstep[{}] loss[{:.2f}] lr[{:.2e}]".format(
-      idx, loss, lr_schedule(idx).numpy()))
+      idx, loss, lr.numpy()))
+
+  if val_dataset is not None and (idx > 0 and idx % args.val_step == 0):
+    val_loss = 0; num_val = 0
+    for val_data in val_dataset:
+      val_loss += run_step(tf.cast(idx, tf.int64),
+        val_data["s1"], val_data["s2"], val_data["mix"], training=False)
+      num_val += 1
+    val_loss /= num_val
+
+    if prev_val_loss is None:
+      prev_val_loss = val_loss
+    else:
+      if prev_val_loss < val_loss: stall_cnt += 1
+      else: stall_cnt = 0
+
+    if stall_cnt >= args.val_lr_update:
+      lr.assign(lr / 2.)
+      stall_cnt = 0
+    
+    logger.info("gstep[{}] val-loss[{:.2f}] lr[{:.2e}]".format(
+      idx, val_loss, lr.numpy()))
+    prev_val_loss = min(prev_val_loss, val_loss)
 
   if idx > 0 and idx % args.save_step == 0:
     modelname = "model-{}.ckpt".format(idx)

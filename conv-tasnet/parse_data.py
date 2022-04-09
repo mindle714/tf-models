@@ -19,3 +19,11 @@ def gen_train(tfrec_list, pcm_len, batch_size=16, seed=1234):
   dataset = dataset.batch(batch_size)
   dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
   return dataset
+
+def gen_val(tfrec_list, pcm_len, batch_size=16, seed=1234):
+  dataset = tf.data.TFRecordDataset(tfrec_list)
+
+  dataset = dataset.map(parse_func(pcm_len))
+  dataset = dataset.batch(batch_size, drop_remainder=True)
+  dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+  return dataset
