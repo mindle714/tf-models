@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 
-expdir=exps/naive3
+expdir=exps/naive5_v4_skip
 
 resdir=results/$(basename $expdir)
 mkdir -p $resdir

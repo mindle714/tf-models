@@ -1,6 +1,9 @@
-8k_tr_min/
+8k_*/
 exps/
 results/
 __pycache__/
 *.wav
 *.png
+*.eval
+*.list
+*.log

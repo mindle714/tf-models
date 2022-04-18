@@ -88,8 +88,9 @@ opt = tf.keras.optimizers.Adam(learning_rate=lr)
 import model
 m = model.convtas()
 
-origins = [val.__spec__.origin for name, val in globals().items() \
+specs = [val.__spec__ for name, val in sys.modules.items() \
   if isinstance(val, types.ModuleType)]
+origins = [spec.origin for spec in specs if spec is not None]
 origins = [e for e in origins if e is not None and os.getcwd() in e]
 
 import shutil
@@ -110,7 +111,7 @@ def run_step(step, s1, s2, mix, training=True):
 
   if training:
     grads = tape.gradient(loss, m.trainable_weights)
-    grads = [tf.clip_by_norm(g, 5.) for g in grads]
+    grads, _ = tf.clip_by_global_norm(grads, 5.)
     opt.apply_gradients(zip(grads, m.trainable_weights))
 
   return loss
@@ -164,4 +165,13 @@ for idx, data in enumerate(dataset):
     modelname = "model-{}.ckpt".format(idx)
     modelpath = os.path.join(args.output, modelname)
     ckpt.write(modelpath)
+
+    optname = "adam-{}-weight".format(idx)
+    optpath = os.path.join(args.output, optname)
+    np.save(optpath, opt.get_weights())
+    
+    cfgname = "adam-{}-config".format(idx)
+    cfgpath = os.path.join(args.output, cfgname)
+    np.save(cfgpath, opt.get_config())
+
     logger.info("model is saved as {}".format(modelpath))

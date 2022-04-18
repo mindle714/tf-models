@@ -1,8 +1,8 @@
 import tensorflow as tf
 import functools
 import numpy as np
-  
-tf_mean = tf.math.reduce_mean
+from util import *
+
 tf_sum = tf.math.reduce_sum
 tf_expd = tf.expand_dims
 
@@ -14,21 +14,40 @@ def log10(x):
 import itertools
 
 # ref[batch, timestep, mixture], hyp[..]
-def si_snr(ref, hyp, pit=True, eps=1e-8):
-  ref = ref - tf_mean(ref, 1, keepdims=True)
-  hyp = hyp - tf_mean(hyp, 1, keepdims=True)
+def si_snr(ref, hyp, mask=None, pit=True, eps=1e-8):
+  def norm_mean(e):
+    if mask is not None:
+      m, _ = tf.nn.weighted_moments(e, [1], mask, keepdims=True)
+    else:
+      m, _ = tf.nn.moments(e, [1], keepdims=True)
+
+    return e - m
+
+  ref = norm_mean(ref)
+  hyp = norm_mean(hyp)
 
   if pit:
     ref = tf_expd(ref, -2)
     hyp = tf_expd(hyp, -1)
 
-  # s_tgt = <s,s'>s/||s||^2
-  s_tgt = tf_sum(ref * hyp, 1, keepdims=True)
-  s_tgt = s_tgt * ref / (tf_sum(ref**2, 1, keepdims=True) + eps)
+  if mask is not None:
+    mask = tf_expd(mask, -1)
+    # s_tgt = <s,s'>s/||s||^2
+    s_tgt = tf_sum((ref * hyp) * mask, 1, keepdims=True)
+    s_tgt = s_tgt * ref / (tf_sum((ref**2) * mask, 1, keepdims=True) + eps)
   
-  e_ns = hyp - s_tgt
-  snr = tf_sum(s_tgt**2, 1) / (tf_sum(e_ns**2, 1) + eps)
-  snr = 10 * log10(snr)
+    e_ns = hyp - s_tgt
+    snr = tf_sum((s_tgt**2) * mask, 1) / (tf_sum((e_ns**2) * mask, 1) + eps)
+    snr = 10 * log10(snr)
+
+  else:
+    # s_tgt = <s,s'>s/||s||^2
+    s_tgt = tf_sum((ref * hyp), 1, keepdims=True)
+    s_tgt = s_tgt * ref / (tf_sum((ref**2), 1, keepdims=True) + eps)
+  
+    e_ns = hyp - s_tgt
+    snr = tf_sum((s_tgt**2), 1) / (tf_sum((e_ns**2), 1) + eps)
+    snr = 10 * log10(snr)
 
   if pit:
     num_mix = snr.shape[-1]
@@ -50,24 +69,6 @@ def si_snr(ref, hyp, pit=True, eps=1e-8):
 
   return snr, hyp
 
-class gnorm(tf.keras.layers.Layer):
-  def __init__(self, *args, **kwargs):
-    super(gnorm, self).__init__(*args, **kwargs)
-
-  def build(self, input_shape):
-    dim = input_shape[-1]
-
-    self.eps = 1e-8
-    self.gamma = self.add_weight(shape=(dim),
-      initializer="ones", name="gamma")
-    self.beta = self.add_weight(shape=(dim),
-      initializer="zeros", name="beta")
-
-  def call(self, inputs, training=None):
-    x = inputs
-    m, v = tf.nn.moments(x, axes=[1, 2], keepdims=True)
-    return self.gamma * (x-m) / tf.math.sqrt(v + self.eps) + self.beta
-
 class depconv(tf.keras.layers.Layer):
   def __init__(self, dim, kernel, dilation,
                skip=True, add_out=True, *args, **kwargs):
@@ -81,13 +82,13 @@ class depconv(tf.keras.layers.Layer):
   def build(self, input_shape):
     conv_opt = dict(padding='same')
 
-    self.conv = tf.keras.layers.Conv1D(self.dim, 1, **conv_opt)
-    self.dconv = tf.keras.layers.Conv1D(self.dim, self.kernel,
+    self.conv = conv1d(self.dim, 1, **conv_opt)
+    self.dconv = conv1d(self.dim, self.kernel,
       groups=self.dim, dilation_rate=self.dilation, **conv_opt)
 
     dim = input_shape[-1]
     if self.add_out:
-      self.out = tf.keras.layers.Conv1D(dim, 1, **conv_opt, name='out')
+      self.out = conv1d(dim, 1, **conv_opt)
 
     self.prelu1 = tf.keras.layers.PReLU(shared_axes=[1, 2], 
       alpha_initializer=tf.constant_initializer(0.25))
@@ -98,14 +99,19 @@ class depconv(tf.keras.layers.Layer):
     self.norm2 = gnorm()
 
     if self.skip:
-      self.skipconv = tf.keras.layers.Conv1D(dim, 1, **conv_opt, name='skip')
+      self.skipconv = conv1d(dim, 1, **conv_opt)
 
   def call(self, inputs, training=None):
     x = inputs
 
-    x = self.norm1(self.prelu1(self.conv(x)))
-    x = self.norm2(self.prelu2(self.dconv(x)))
-    x_res = self.out(x) if self.add_out else None
+    x = self.conv(x)
+    x = self.norm1(self.prelu1(x))
+    x = self.dconv(x)
+    x = self.norm2(self.prelu2(x))
+
+    x_res = None
+    if self.add_out:
+      x_res = self.out(x)
 
     if self.skip:
       x_skip = self.skipconv(x)
@@ -120,7 +126,6 @@ class tcn(tf.keras.layers.Layer):
     self.H = 512
     self.out_dim = out_dim
     self.num_spk = num_spk
-    self.causal = False
     self.stack = stack
     self.layer = layer
     self.kernel = 3
@@ -128,7 +133,7 @@ class tcn(tf.keras.layers.Layer):
 
   def build(self, input_shape):
     self.norm = gnorm()
-    self.preconv = tf.keras.layers.Conv1D(self.B, 1)
+    self.preconv = conv1d(self.B, 1)
 
     self.convs = []
     for s in range(self.stack):
@@ -143,7 +148,7 @@ class tcn(tf.keras.layers.Layer):
 
     self.prelu = tf.keras.layers.PReLU(shared_axes=[1, 2], 
       alpha_initializer=tf.constant_initializer(0.25))
-    self.postconv = tf.keras.layers.Conv1D(self.out_dim*self.num_spk, 1)
+    self.postconv = conv1d(self.out_dim*self.num_spk, 1)
   
   def call(self, inputs, training=None):
     x = inputs
@@ -162,48 +167,50 @@ class tcn(tf.keras.layers.Layer):
     else:
       for conv in self.convs:
         res = x
-        x = conv(x) + res
+        x = conv(x)
+        x = x + res
 
     x = self.postconv(self.prelu(x))
-    return tf.reshape(x,
-      tf.concat([tf.shape(x)[:2], [self.num_spk, self.out_dim]], 0))
+    return tf.reshape(x, tf.concat([
+      tf.shape(x)[:2], [self.num_spk, self.out_dim]], 0))
 
 class convtas(tf.keras.layers.Layer):
-  def __init__(self, sr=8000, L=16, *args, **kwargs):
+  def __init__(self, L=16, *args, **kwargs):
     super(convtas, self).__init__(*args, **kwargs)
-    self.enc_dim = 512
-    self.feature_dim = 128
-    self.sr = sr
+    self.N = 512
     self.L = L
-    self.layer = 8
     self.stack = 3
+    self.layer = 8
     self.kernel = 3
-    self.causal = False
     self.num_spk = 2
 
   def build(self, input_shape):
     conv_opt = dict(padding='same')
     stride = self.L // 2
 
-    self.encoder = tf.keras.layers.Conv1D(self.enc_dim, self.L,
+    self.encoder = conv1d(self.N, self.L,
       use_bias=False, strides=stride, **conv_opt)
 
-    self.tcn = tcn(self.stack, self.layer, self.enc_dim, self.num_spk)
+    self.tcn = tcn(self.stack, self.layer, self.N, self.num_spk)
 
-    self.decoder = tf.keras.layers.Conv1DTranspose(1, self.L,
+    self.decoder = conv1dtrans(1, self.L,
       use_bias=False, strides=stride, **conv_opt)
 
   def call(self, inputs, training=None):
     s1, s2, mix = inputs
+
     if s1 is not None and s2 is not None:
       sm = tf.concat([tf_expd(s1, -1), tf_expd(s2, -1)], -1)
 
-    x = tf.nn.relu(self.encoder(tf_expd(mix, -1)))
-    mask = tf.math.sigmoid(self.tcn(x))
-    x = tf_expd(x, -2) * mask
+    mix = tf_expd(mix, -1)
+    x = tf.nn.relu(self.encoder(mix))
+
+    x_sep = self.tcn(x) 
+    x_sep = tf.math.sigmoid(x_sep)
+    x = tf_expd(x, -2) * x_sep
 
     x = tf.transpose(x, [0, 2, 1, 3])
-    x = tf.reshape(x, [-1, tf.shape(x)[-2], self.enc_dim])
+    x = tf.reshape(x, [-1, tf.shape(x)[-2], self.N])
     
     x = self.decoder(x)
     x = tf.reshape(x, [-1, self.num_spk, tf.shape(x)[-2]])
@@ -211,6 +218,6 @@ class convtas(tf.keras.layers.Layer):
 
     if s1 is not None and s2 is not None:
       snr, sort_x = si_snr(sm, x)
-      return -tf_mean(snr)
+      return -tf.math.reduce_mean(snr)
 
     return x
