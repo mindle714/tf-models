@@ -1,10 +1,23 @@
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--ckpt", type=str, required=True) 
-parser.add_argument("--eval-list", type=str, required=False,
-  default="/home/speech/wsj0/8k_tt_min.list") 
+parser.add_argument("--eval-list", type=str, required=False, default="test.list") 
+parser.add_argument("--noise-list", type=str, required=False, default="ns_test.list") 
 parser.add_argument("--save-result", action="store_true") 
 args = parser.parse_args()
+
+import tensorflow as tf
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+  try:
+    # Currently, memory growth needs to be the same across GPUs
+    for gpu in gpus:
+      tf.config.experimental.set_memory_growth(gpu, True)
+    logical_gpus = tf.config.list_logical_devices('GPU')
+    print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+  except RuntimeError as e:
+    # Memory growth must be set before GPUs have been initialized
+    print(e)
 
 import os
 import sys
@@ -31,9 +44,8 @@ with open(exp_args, "r") as f:
 import numpy as np
 m = model.convtas()
 _in = np.zeros((1, samp_len), dtype=np.float32)
-_ = m((None, None, _in), training=False)
+_ = m((_in, None), training=False)
 
-import tensorflow as tf
 ckpt = tf.train.Checkpoint(m)
 ckpt.read(args.ckpt)
 
@@ -41,22 +53,44 @@ import warnings
 import soundfile
 import tqdm
 
-evals = [e.strip() for e in open(args.eval_list, "r").readlines()]
+def add_noise(pcm, noise, snr_db):
+  if pcm.shape[0] >= noise.shape[0]:
+    noise = np.repeat(noise, (pcm.shape[0]//noise.shape[0]+1))
+    noise = noise[:pcm.shape[0]]
+  else:
+    pos = np.random.randint(0, noise.shape[0]-pcm.shape[0]+1)
+    noise = noise[pos:pos+pcm.shape[0]]
 
-with open("{}-{}.eval".format(expname, epoch), "w") as f:
+  pcm_en = np.mean(pcm**2)
+  noise_en = np.maximum(np.mean(noise**2), 1e-9)
+  snr_en = 10.**(snr_db/10.)
+
+  noise *= np.sqrt(pcm_en / (snr_en * noise_en))
+  pcm += noise
+  noise_pcm_en = np.maximum(np.mean(pcm**2), 1e-9)
+  pcm *= np.sqrt(pcm_en / noise_pcm_en)
+
+  return pcm
+
+evals = [e.strip() for e in open(args.eval_list, "r").readlines()]
+noises = [e.strip() for e in open(args.noise_list, "r").readlines()]
+ 
+if len(evals) > len(noises):
+  noises = noises * (len(evals)//len(noises)+1)
+noises = noises[:len(evals)]
+
+with open("{}-{}.eval2".format(expname, epoch), "w") as f:
   pcount = 0; snr_tot = 0
 
   for idx, _line in enumerate(evals):
-    if len(_line.split()) != 3:
-      warnings.warn("failed to parse {} at line {}".format(_line, idx))
-      continue
+    pcm, _ = soundfile.read(_line)
+    ref = np.copy(pcm)
 
-    s1, s2, mix = [soundfile.read(e)[0] for e in _line.split()]
-    assert s1.shape[0] == s2.shape[0] and s2.shape[0] == mix.shape[0]
+    noise, _ = soundfile.read(noises[idx])
+    pcm = add_noise(pcm, noise, 20)
 
-    mix = np.expand_dims(mix, 0).astype(np.float32)
-    ref = np.concatenate([e[np.newaxis,:,np.newaxis] for e in [s1, s2]], -1)
-    ref = ref.astype(np.float32)
+    ref = ref.reshape([1,ref.shape[0],1]).astype(np.float32)
+    pcm = np.expand_dims(pcm, 0).astype(np.float32)
 
     def pad(pcm, mod=8):
       if pcm.shape[-1] % mod != 0:
@@ -64,46 +98,22 @@ with open("{}-{}.eval".format(expname, epoch), "w") as f:
         return pcm
       return pcm
 
-    hyp = m((None, None, pad(mix)), training=False)
+    hyp = m((pad(pcm), None), training=False)
     _, sort_hyp = model.si_snr(ref, hyp[:,:ref.shape[1],:])
+    if idx < 3:
+      soundfile.write("{}_orig_{}.wav".format(expname, idx), np.squeeze(pcm), 16000)
+      soundfile.write("{}_hyp_{}.wav".format(expname, idx), np.squeeze(sort_hyp), 16000)
+      soundfile.write("{}_ref_{}.wav".format(expname, idx), np.squeeze(ref), 16000)
 
-    ref1, ref2 = np.split(ref, 2, -1)
-    hyp1, hyp2 = np.split(sort_hyp, 2, -1)
+    snr, _ = model.si_snr(ref, sort_hyp, pit=False)
 
-    snr1, _ = model.si_snr(ref1, hyp1, pit=False)
-    snr2, _ = model.si_snr(ref2, hyp2, pit=False)
-
-    mix = np.expand_dims(mix, -1)
-    snr1_mix, _ = model.si_snr(ref1, mix, pit=False)
-    snr2_mix, _ = model.si_snr(ref2, mix, pit=False)
-    snr = ((snr1 - snr1_mix) + (snr2 - snr2_mix)) / 2.
+    #pcm = np.expand_dims(pcm, -1)
+    #snr_pcm, _ = model.si_snr(ref, pcm, pit=False)
+    #snr = (snr - snr_pcm)
 
     snr_tot += np.squeeze(snr)
     print("si-snr {} len {}".format(snr, ref.shape[1]))
     f.write("si-snr {} len {}\n".format(snr, ref.shape[1]))
     f.flush()
-  
-    if args.save_result:
-      soundfile.write("{}-{}-mix-{}.wav".format(expname, epoch, idx), mix[0,:,0], 8000)
-      soundfile.write("{}-{}-s1-{}.wav".format(expname, epoch, idx), hyp1[0,:,0], 8000)
-      soundfile.write("{}-{}-s2-{}.wav".format(expname, epoch, idx), hyp2[0,:,0], 8000)
-
-      import librosa
-      import librosa.display
-
-      def plot_spec(pcm, suffix, frame_sec=0.02):
-        f = librosa.stft(pcm, n_fft=int(8000*frame_sec))
-        db = librosa.amplitude_to_db(np.abs(f), ref=np.max)
-      
-        import matplotlib.pyplot as plt
-        fig = plt.figure(figsize=(19.2, 4.8))
-        librosa.display.specshow(db, x_axis='time', y_axis='linear',
-          sr=8000, hop_length=int(8000*frame_sec)//4)
-        plt.colorbar()
-        plt.savefig("{}-{}-{}.png".format(expname, epoch, suffix))
-
-      plot_spec(mix[0,:,0], "mix-{}".format(idx))
-      plot_spec(hyp1[0,:,0], "s1-{}".format(idx))
-      plot_spec(hyp2[0,:,0], "s2-{}".format(idx))
 
 print("{}-{}\t{}".format(expname, epoch, snr_tot / len(evals)))

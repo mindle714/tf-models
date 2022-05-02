@@ -3,7 +3,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--train-list", type=str, required=True) 
 parser.add_argument("--noise-list", nargs="+", default=[]) 
 parser.add_argument("--noise-ratio", type=float, required=False, default=0.)
-parser.add_argument("--min-snr", type=int, required=False, default=10)
+parser.add_argument("--min-snr", type=int, required=False, default=0)
 parser.add_argument("--max-snr", type=int, required=False, default=10)
 parser.add_argument("--num-chunks", type=int, required=False, default=100)
 parser.add_argument("--samp-len", type=int, required=False, default=32000)
@@ -57,36 +57,31 @@ if len(args.noise_list) > 0:
 
 import warnings
 import tensorflow as tf
+import multiprocessing
 import numpy as np
+import copy
 import soundfile
 import tqdm
 
-def add_noise(pcm, noise):
+def add_noise(pcm, noise, snr_db):
+  ns_pcm = copy.deepcopy(pcm)
+
   if args.apply_jointb:
-    f_orig = librosa.stft(pcm)
+    f_orig = librosa.stft(ns_pcm)
     m_orig = magnitude(f_orig)
     m_orig = librosa.amplitude_to_db(m_orig)
 
-  snr_db = np.random.uniform(args.min_snr, args.max_snr)
-
-  if pcm.shape[0] >= noise.shape[0]:
-    noise = np.repeat(noise, (pcm.shape[0]//noise.shape[0]+1))
-    noise = noise[:pcm.shape[0]]
-  else:
-    pos = np.random.randint(0, noise.shape[0]-pcm.shape[0]+1)
-    noise = noise[pos:pos+pcm.shape[0]]
-
-  pcm_en = np.mean(pcm**2)
+  pcm_en = np.mean(ns_pcm**2)
   noise_en = np.maximum(np.mean(noise**2), 1e-9)
   snr_en = 10.**(snr_db/10.)
 
   noise *= np.sqrt(pcm_en / (snr_en * noise_en))
-  pcm += noise
-  noise_pcm_en = np.maximum(np.mean(pcm**2), 1e-9)
-  pcm *= np.sqrt(pcm_en / noise_pcm_en)
+  ns_pcm += noise
+  noise_pcm_en = np.maximum(np.mean(ns_pcm**2), 1e-9)
+  ns_pcm *= np.sqrt(pcm_en / noise_pcm_en)
 
   if args.apply_jointb:
-    f_ns = librosa.stft(pcm)
+    f_ns = librosa.stft(ns_pcm)
     m_ns = magnitude(f_ns); ph_ns = phase(f_ns)
     m_ns = librosa.amplitude_to_db(m_ns)
 
@@ -95,48 +90,31 @@ def add_noise(pcm, noise):
     m_ns_new = np.squeeze(m_ns_new, -1)
     m_ns_new = librosa.db_to_amplitude(m_ns_new)
 
-    pcm = librosa.istft(polar(m_ns_new, ph_ns), length=pcm.shape[0])
+    ns_pcm = librosa.istft(polar(m_ns_new, ph_ns), length=ns_pcm.shape[0])
 
-  return pcm
+  return ns_pcm
 
-num_chunks = min(len(train_list), args.num_chunks)
-writers = [tf.io.TFRecordWriter(os.path.join(
-    args.output, "train-{}.tfrecord".format(idx))) for idx in range(num_chunks)]
+def get_feat(_pcm, _samp_len, do_add_noise, noise, snr_db):
+  _ref = copy.deepcopy(_pcm)
+  if do_add_noise: _pcm = add_noise(_pcm, noise, snr_db)
 
-chunk_idx = 0; chunk_lens = [0 for _ in range(num_chunks)]
+  ref_feat = tf.train.Feature(float_list=tf.train.FloatList(value=_ref))
+  pcm_feat = tf.train.Feature(float_list=tf.train.FloatList(value=_pcm))
+  len_feat = tf.train.Feature(int64_list=tf.train.Int64List(value=[_samp_len]))
 
-for idx, _list in tqdm.tqdm(enumerate(train_list), total=len(train_list)):
-  pcm, sr = soundfile.read(_list)
+  feats = {'pcm': pcm_feat, 'ref': ref_feat, 'samp_len': len_feat}
+  ex = tf.train.Example(features=tf.train.Features(feature=feats))
+  return ex.SerializeToString()
 
-  hop_len = args.hop_len
-  samp_len = args.samp_len
+def get_feats(pcm, do_add_noise, noise, snr_db):
+  exs = []
   num_seg = max((pcm.shape[0] - samp_len) // hop_len + 1, 0)
-
-  def get_feat(_pcm, _samp_len):
-    do_add_noise = np.random.choice([True, False], 
-      p=[args.noise_ratio, 1-args.noise_ratio])
-    if args.noise_list is None: do_add_noise = False  
-
-    _ref = _pcm
-    if do_add_noise:
-      noise, _ = soundfile.read(noise_list[idx])
-      _pcm = add_noise(_pcm, noise)
-
-    ref_feat = tf.train.Feature(float_list=tf.train.FloatList(value=_ref))
-    pcm_feat = tf.train.Feature(float_list=tf.train.FloatList(value=_pcm))
-    len_feat = tf.train.Feature(int64_list=tf.train.Int64List(value=[_samp_len]))
-
-    feats = {'pcm': pcm_feat, 'ref': ref_feat, 'samp_len': len_feat}
-    return tf.train.Example(features=tf.train.Features(feature=feats))
 
   for pcm_idx in range(num_seg):
     _pcm = pcm[pcm_idx*hop_len: pcm_idx*hop_len+samp_len]
-
-    ex = get_feat(_pcm, samp_len)
-    writers[chunk_idx].write(ex.SerializeToString())
-
-    chunk_lens[chunk_idx] += 1
-    chunk_idx = (chunk_idx+1) % num_chunks
+    _noise = noise[pcm_idx*hop_len: pcm_idx*hop_len+samp_len]
+    ex = get_feat(_pcm, samp_len, do_add_noise, _noise, snr_db)
+    exs.append(ex)
 
   rem_len = pcm[num_seg*hop_len:].shape[0]
   if (not args.no_remainder) and rem_len > 0:
@@ -145,12 +123,51 @@ for idx, _list in tqdm.tqdm(enumerate(train_list), total=len(train_list)):
         np.zeros(samp_len-_in.shape[0], dtype=_in.dtype)], 0)
 
     _pcm = pad(pcm[num_seg*hop_len:])
+    _noise = pad(noise[num_seg*hop_len:])
+    ex = get_feat(_pcm, rem_len, do_add_noise, _noise, snr_db)
+    exs.append(ex)
 
-    ex = get_feat(_pcm, samp_len)
-    writers[chunk_idx].write(ex.SerializeToString())
+  return exs
 
-    chunk_lens[chunk_idx] += 1
-    chunk_idx = (chunk_idx+1) % num_chunks
+num_chunks = min(len(train_list), args.num_chunks)
+writers = [tf.io.TFRecordWriter(os.path.join(
+    args.output, "train-{}.tfrecord".format(idx))) for idx in range(num_chunks)]
+
+chunk_idx = 0; chunk_lens = [0 for _ in range(num_chunks)]
+hop_len = args.hop_len; samp_len = args.samp_len
+num_process = 8
+
+for bidx in tqdm.tqdm(range(len(train_list)//num_process+1)):
+  blist = train_list[bidx*num_process:(bidx+1)*num_process]
+  if len(blist) == 0: break
+  nlist = noise_list[bidx*num_process:(bidx+1)*num_process]
+
+  pcms = [soundfile.read(e)[0] for e in blist]
+  do_add_noises = np.random.choice([True, False],
+    len(blist), p=[args.noise_ratio, 1-args.noise_ratio])
+  if args.noise_list is None: do_add_noises = [False for _ in nlist]
+  snr_dbs = np.random.uniform(args.min_snr, args.max_snr, len(blist))
+  noises = [soundfile.read(e)[0] for e in nlist]
+  
+  for nidx in range(len(noises)):
+    pcm = pcms[nidx]; noise = noises[nidx]
+    if pcm.shape[0] >= noise.shape[0]:
+      noise = np.repeat(noise, (pcm.shape[0]//noise.shape[0]+1))
+      noise = noise[:pcm.shape[0]]
+    else:
+      pos = np.random.randint(0, noise.shape[0]-pcm.shape[0]+1)
+      noise = noise[pos:pos+pcm.shape[0]]
+    noises[nidx] = noise
+
+  with multiprocessing.Pool(num_process) as pool:
+    exs = pool.starmap(get_feats,
+      zip(pcms, do_add_noises, noises, snr_dbs))
+
+  for ex in exs:
+    for _ex in ex:
+      writers[chunk_idx].write(_ex)
+      chunk_lens[chunk_idx] += 1
+      chunk_idx = (chunk_idx+1) % num_chunks
 
 for writer in writers:
   writer.close()

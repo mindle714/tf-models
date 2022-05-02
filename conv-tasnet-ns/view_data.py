@@ -10,7 +10,7 @@ import soundfile
 import numpy as np
 
 i = 0
-for rec in data.take(7):
+for rec in data.take(3):
   ex = tf.train.Example()
   ex.ParseFromString(rec.numpy())
   #print(ex.features.feature['samp_len'].int64_list.value)

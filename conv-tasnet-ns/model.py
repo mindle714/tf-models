@@ -123,7 +123,7 @@ class tcn(tf.keras.layers.Layer):
   def __init__(self, stack, layer, out_dim, num_spk, skip=True, *args, **kwargs):
     super(tcn, self).__init__(*args, **kwargs)
     self.B = 128
-    self.H = 512
+    self.H = 256
     self.out_dim = out_dim
     self.num_spk = num_spk
     self.stack = stack
@@ -175,14 +175,14 @@ class tcn(tf.keras.layers.Layer):
       tf.shape(x)[:2], [self.num_spk, self.out_dim]], 0))
 
 class convtas(tf.keras.layers.Layer):
-  def __init__(self, L=16, *args, **kwargs):
+  def __init__(self, L=40, *args, **kwargs):
     super(convtas, self).__init__(*args, **kwargs)
-    self.N = 512
+    self.N = 128
     self.L = L
-    self.stack = 3
-    self.layer = 8
+    self.stack = 2
+    self.layer = 7
     self.kernel = 3
-    self.num_spk = 2
+    self.num_spk = 1
 
   def build(self, input_shape):
     conv_opt = dict(padding='same')
@@ -197,13 +197,13 @@ class convtas(tf.keras.layers.Layer):
       use_bias=False, strides=stride, **conv_opt)
 
   def call(self, inputs, training=None):
-    s1, s2, mix = inputs
+    x, ref = inputs
 
-    if s1 is not None and s2 is not None:
-      sm = tf.concat([tf_expd(s1, -1), tf_expd(s2, -1)], -1)
+    if ref is not None:
+      ref = tf_expd(ref, -1)
 
-    mix = tf_expd(mix, -1)
-    x = tf.nn.relu(self.encoder(mix))
+    x = tf_expd(x, -1)
+    x = tf.nn.relu(self.encoder(x))
 
     x_sep = self.tcn(x) 
     x_sep = tf.math.sigmoid(x_sep)
@@ -216,8 +216,8 @@ class convtas(tf.keras.layers.Layer):
     x = tf.reshape(x, [-1, self.num_spk, tf.shape(x)[-2]])
     x = tf.transpose(x, [0, 2, 1])
 
-    if s1 is not None and s2 is not None:
-      snr, sort_x = si_snr(sm, x)
+    if ref is not None:
+      snr, sort_x = si_snr(ref, x)
       return -tf.math.reduce_mean(snr)
 
     return x

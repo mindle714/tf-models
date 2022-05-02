@@ -3,9 +3,8 @@ import tensorflow as tf
 def parse_func(pcm_len, samp_len=True):
   def _parse_func(ex):
     desc = {
-      's1': tf.io.FixedLenFeature([pcm_len], tf.float32),
-      's2': tf.io.FixedLenFeature([pcm_len], tf.float32),
-      'mix': tf.io.FixedLenFeature([pcm_len], tf.float32)
+      'pcm': tf.io.FixedLenFeature([pcm_len], tf.float32),
+      'ref': tf.io.FixedLenFeature([pcm_len], tf.float32)
     }
     if samp_len:
       desc['samp_len'] = tf.io.FixedLenFeature([1], tf.int64)

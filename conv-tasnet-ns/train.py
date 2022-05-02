@@ -14,12 +14,12 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--tfrec", type=str, required=True) 
 parser.add_argument("--val-tfrec", type=str, required=False, default=None)
-parser.add_argument("--batch-size", type=int, required=False, default=64) 
+parser.add_argument("--batch-size", type=int, required=False, default=3) 
 parser.add_argument("--eval-step", type=int, required=False, default=100) 
 parser.add_argument("--save-step", type=int, required=False, default=1000) 
-parser.add_argument("--val-step", type=int, required=False, default=1000) 
-parser.add_argument("--train-step", type=int, required=False, default=30000) 
-parser.add_argument("--begin-lr", type=float, required=False, default=1e-4) 
+parser.add_argument("--val-step", type=int, required=False, default=5000) 
+parser.add_argument("--train-step", type=int, required=False, default=1000000) 
+parser.add_argument("--begin-lr", type=float, required=False, default=1e-3) 
 parser.add_argument("--val-lr-update", type=float, required=False, default=3) 
 parser.add_argument("--output", type=str, required=True) 
 args = parser.parse_args()
@@ -103,9 +103,9 @@ log_writer = tf.summary.create_file_writer(logdir)
 log_writer.set_as_default()
 
 @tf.function
-def run_step(step, s1, s2, mix, training=True):
+def run_step(step, pcm, ref, training=True):
   with tf.GradientTape() as tape, log_writer.as_default():
-    loss = m((s1, s2, mix), training=training)
+    loss = m((pcm, ref), training=training)
     loss = tf.math.reduce_mean(loss)
     tf.summary.scalar("loss", loss, step=step)
 
@@ -131,8 +131,7 @@ prev_val_loss = None; stall_cnt = 0
 for idx, data in enumerate(dataset):
   if idx > args.train_step: break
 
-  loss = run_step(tf.cast(idx, tf.int64), 
-    data["s1"], data["s2"], data["mix"])
+  loss = run_step(tf.cast(idx, tf.int64), data["pcm"], data["ref"])
   log_writer.flush()
 
   if idx > 0 and idx % args.eval_step == 0:
@@ -143,7 +142,7 @@ for idx, data in enumerate(dataset):
     val_loss = 0; num_val = 0
     for val_data in val_dataset:
       val_loss += run_step(tf.cast(idx, tf.int64),
-        val_data["s1"], val_data["s2"], val_data["mix"], training=False)
+        val_data["pcm"], val_data["ref"], training=False)
       num_val += 1
     val_loss /= num_val
 
