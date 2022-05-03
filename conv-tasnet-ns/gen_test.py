@@ -1,6 +1,6 @@
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument("--train-list", type=str, required=True) 
+parser.add_argument("--test-list", type=str, required=True) 
 parser.add_argument("--noise-list", nargs="+", default=[]) 
 parser.add_argument("--noise-ratio", type=float, required=False, default=0.)
 parser.add_argument("--min-snr", type=int, required=False, default=0)
@@ -9,8 +9,6 @@ parser.add_argument("--lpf-ratio", type=float, required=False, default=0.)
 parser.add_argument("--lpf-min-thres", type=float, required=False, default=0.)
 parser.add_argument("--lpf-max-thres", type=float, required=False, default=0.)
 parser.add_argument("--paug-ratio", type=float, required=False, default=0.)
-parser.add_argument("--num-chunks", type=int, required=False, default=100)
-parser.add_argument("--samp-len", type=int, required=False, default=32000)
 parser.add_argument("--hop-len", type=int, required=False, default=16000)
 parser.add_argument("--no-remainder", action='store_true')
 parser.add_argument("--output", type=str, required=True) 
@@ -44,7 +42,7 @@ if os.path.isdir(args.output):
     os.chmod(args_file, S_IWUSR|S_IREAD)
 
 os.makedirs(args.output, exist_ok=True)
-train_list = [e.strip() for e in open(args.train_list).readlines()]
+test_list = [e.strip() for e in open(args.test_list).readlines()]
 
 if len(args.noise_list) > 0:
   noise_list = []
@@ -53,9 +51,9 @@ if len(args.noise_list) > 0:
 
   import random
   random.shuffle(noise_list)
-  if len(train_list) > len(noise_list):
-    noise_list = noise_list * (len(train_list)//len(noise_list)+1)
-  noise_list = noise_list[:len(train_list)]
+  if len(test_list) > len(noise_list):
+    noise_list = noise_list * (len(test_list)//len(noise_list)+1)
+  noise_list = noise_list[:len(test_list)]
 
   with open(os.path.join(args.output, "noise.list"), "w") as f:
     for _list in noise_list:
@@ -102,7 +100,7 @@ def add_noise(pcm, noise, snr_db):
 
   return ns_pcm
 
-def get_feat(_pcm, _samp_len, 
+def get_feat(_pcm,
              do_add_noise, noise, snr_db, 
              do_lpf, lpf_thres,
              do_paug):
@@ -112,52 +110,15 @@ def get_feat(_pcm, _samp_len,
   if do_lpf: _pcm = lpf.lowpass(_pcm, lpf_thres) 
   if do_paug: _pcm = paug.pattern_mask(_pcm) 
 
-  ref_feat = tf.train.Feature(float_list=tf.train.FloatList(value=_ref))
-  pcm_feat = tf.train.Feature(float_list=tf.train.FloatList(value=_pcm))
-  len_feat = tf.train.Feature(int64_list=tf.train.Int64List(value=[_samp_len]))
+  feats = {'pcm': _pcm, 'ref': _ref}
+  return feats
 
-  feats = {'pcm': pcm_feat, 'ref': ref_feat, 'samp_len': len_feat}
-  ex = tf.train.Example(features=tf.train.Features(feature=feats))
-  return ex.SerializeToString()
-
-def get_feats(pcm, 
-              do_add_noise, noise, snr_db, 
-              do_lpf, lpf_thres,
-              do_paug):
-  exs = []
-  num_seg = max((pcm.shape[0] - samp_len) // hop_len + 1, 0)
-
-  for pcm_idx in range(num_seg):
-    _pcm = pcm[pcm_idx*hop_len: pcm_idx*hop_len+samp_len]
-    _noise = noise[pcm_idx*hop_len: pcm_idx*hop_len+samp_len]
-    ex = get_feat(_pcm, samp_len, 
-      do_add_noise, _noise, snr_db, do_lpf, lpf_thres, do_paug)
-    exs.append(ex)
-
-  rem_len = pcm[num_seg*hop_len:].shape[0]
-  if (not args.no_remainder) and rem_len > 0:
-    def pad(_in):
-      return np.concatenate([_in,
-        np.zeros(samp_len-_in.shape[0], dtype=_in.dtype)], 0)
-
-    _pcm = pad(pcm[num_seg*hop_len:])
-    _noise = pad(noise[num_seg*hop_len:])
-    ex = get_feat(_pcm, rem_len, 
-      do_add_noise, _noise, snr_db, do_lpf, lpf_thres, do_paug)
-    exs.append(ex)
-
-  return exs
-
-num_chunks = min(len(train_list), args.num_chunks)
-writers = [tf.io.TFRecordWriter(os.path.join(
-    args.output, "train-{}.tfrecord".format(idx))) for idx in range(num_chunks)]
-
-chunk_idx = 0; chunk_lens = [0 for _ in range(num_chunks)]
-hop_len = args.hop_len; samp_len = args.samp_len
+hop_len = args.hop_len
 num_process = 8
+pcm_refs = []
 
-for bidx in tqdm.tqdm(range(len(train_list)//num_process+1)):
-  blist = train_list[bidx*num_process:(bidx+1)*num_process]
+for bidx in tqdm.tqdm(range(len(test_list)//num_process+1)):
+  blist = test_list[bidx*num_process:(bidx+1)*num_process]
   if len(blist) == 0: break
   nlist = noise_list[bidx*num_process:(bidx+1)*num_process]
 
@@ -188,19 +149,22 @@ for bidx in tqdm.tqdm(range(len(train_list)//num_process+1)):
     noises[nidx] = noise
 
   with multiprocessing.Pool(num_process) as pool:
-    exs = pool.starmap(get_feats,
+    exs = pool.starmap(get_feat,
       zip(pcms, do_add_noises, noises, snr_dbs, do_lpfs, lpf_thress, do_paugs))
 
-  for ex in exs:
-    for _ex in ex:
-      writers[chunk_idx].write(_ex)
-      chunk_lens[chunk_idx] += 1
-      chunk_idx = (chunk_idx+1) % num_chunks
+  for idx, ex in enumerate(exs):
+    pcm_path = os.path.join(args.output, 
+      "pcm_{}.wav".format(bidx*num_process + idx))
+    ref_path = os.path.join(args.output,
+      "ref_{}.wav".format(bidx*num_process + idx))
 
-for writer in writers:
-  writer.close()
+    soundfile.write(pcm_path, ex["pcm"], 16000) 
+    soundfile.write(ref_path, ex["ref"], 16000)
+    pcm_refs.append((os.path.abspath(pcm_path), os.path.abspath(ref_path)))
 
-args.chunk_lens = chunk_lens
+with open(os.path.join(args.output, "pcm_ref.list"), "w") as f:
+  for pcm, ref in pcm_refs:
+    f.write("{} {}\n".format(pcm, ref))
 
 with open(args_file, "w") as f:
   f.write(" ".join([sys.executable] + sys.argv))
@@ -209,5 +173,5 @@ with open(args_file, "w") as f:
 os.chmod(args_file, S_IREAD|S_IRGRP|S_IROTH)
 
 import shutil
-for origin in [os.path.abspath(__file__), args.train_list]:
+for origin in [os.path.abspath(__file__), args.test_list]:
   shutil.copy(origin, args.output)

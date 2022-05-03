@@ -1,8 +1,7 @@
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--ckpt", type=str, required=True) 
-parser.add_argument("--eval-list", type=str, required=False, default="test.list") 
-parser.add_argument("--noise-list", type=str, required=False, default="ns_test.list") 
+parser.add_argument("--eval-list", type=str, required=False, default="wsj0_test_lpf/pcm_ref.list") 
 parser.add_argument("--save-result", action="store_true") 
 args = parser.parse_args()
 
@@ -53,41 +52,13 @@ import warnings
 import soundfile
 import tqdm
 
-def add_noise(pcm, noise, snr_db):
-  if pcm.shape[0] >= noise.shape[0]:
-    noise = np.repeat(noise, (pcm.shape[0]//noise.shape[0]+1))
-    noise = noise[:pcm.shape[0]]
-  else:
-    pos = np.random.randint(0, noise.shape[0]-pcm.shape[0]+1)
-    noise = noise[pos:pos+pcm.shape[0]]
-
-  pcm_en = np.mean(pcm**2)
-  noise_en = np.maximum(np.mean(noise**2), 1e-9)
-  snr_en = 10.**(snr_db/10.)
-
-  noise *= np.sqrt(pcm_en / (snr_en * noise_en))
-  pcm += noise
-  noise_pcm_en = np.maximum(np.mean(pcm**2), 1e-9)
-  pcm *= np.sqrt(pcm_en / noise_pcm_en)
-
-  return pcm
-
-evals = [e.strip() for e in open(args.eval_list, "r").readlines()]
-noises = [e.strip() for e in open(args.noise_list, "r").readlines()]
- 
-if len(evals) > len(noises):
-  noises = noises * (len(evals)//len(noises)+1)
-noises = noises[:len(evals)]
-
-with open("{}-{}.eval2".format(expname, epoch), "w") as f:
+evals = [e.strip().split() for e in open(args.eval_list, "r").readlines()]
+with open("{}-{}.eval".format(expname, epoch), "w") as f:
   pcount = 0; snr_tot = 0
 
-  for idx, _line in enumerate(evals):
-    pcm, _ = soundfile.read(_line)
-    ref = np.copy(pcm)
-
-    noise, _ = soundfile.read(noises[idx])
-    pcm = add_noise(pcm, noise, 20)
+  for idx, (_pcm, _ref) in enumerate(evals):
+    pcm, _ = soundfile.read(_pcm)
+    ref, _ = soundfile.read(_ref)
 
     ref = ref.reshape([1,ref.shape[0],1]).astype(np.float32)
     pcm = np.expand_dims(pcm, 0).astype(np.float32)
@@ -100,10 +71,14 @@ with open("{}-{}.eval2".format(expname, epoch), "w") as f:
 
     hyp = m((pad(pcm), None), training=False)
     _, sort_hyp = model.si_snr(ref, hyp[:,:ref.shape[1],:])
-    if idx < 3:
-      soundfile.write("{}_orig_{}.wav".format(expname, idx), np.squeeze(pcm), 16000)
-      soundfile.write("{}_hyp_{}.wav".format(expname, idx), np.squeeze(sort_hyp), 16000)
-      soundfile.write("{}_ref_{}.wav".format(expname, idx), np.squeeze(ref), 16000)
+    if idx < 2:
+      import viz
+      soundfile.write("{}-{}_orig_{}.wav".format(expname, epoch, idx), np.squeeze(pcm), 16000)
+      soundfile.write("{}-{}_hyp_{}.wav".format(expname, epoch, idx), np.squeeze(sort_hyp), 16000)
+      soundfile.write("{}-{}_ref_{}.wav".format(expname, epoch, idx), np.squeeze(ref), 16000)
+      viz.plot_spec(np.squeeze(pcm), "{}-{}_orig_{}".format(expname, epoch, idx), 16000)
+      viz.plot_spec(np.squeeze(sort_hyp), "{}-{}_hyp_{}".format(expname, epoch, idx), 16000)
+      viz.plot_spec(np.squeeze(ref), "{}-{}_ref_{}".format(expname, epoch, idx), 16000)
 
     snr, _ = model.si_snr(ref, sort_hyp, pit=False)
 

@@ -1,5 +1,6 @@
 __pycache__/
-wsj0/
-wsj0_jb/
-wsj0_clean/
+wsj0*/
 exps/
+*.wav
+*.png
+*.eval
