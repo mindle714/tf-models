@@ -1,0 +1,30 @@
+#!/bin/bash
+
+cat /home/speech/demand/16k_split.list | shuf | \
+  awk 'NR<=272{print "test "$1} NR>272&&NR<=544{print "valid "$1} NR>544{print "train "$1}' > .list
+cat .list | grep "^test" | awk '{print $2}' > ns_test.list
+cat .list | grep "^valid" | awk '{print $2}' > ns_valid.list
+cat .list | grep "^train" | awk '{print $2}' > ns_train.list
+
+cat /home/speech/musan/music_split.list | shuf | \
+  awk 'NR<=511{print "test "$1} NR>511&&NR<=1022{print "valid "$1} NR>1022{print "train "$1}' > .list
+cat .list | grep "^test" | awk '{print $2}' >> ns_test.list
+cat .list | grep "^valid" | awk '{print $2}' >> ns_valid.list
+cat .list | grep "^train" | awk '{print $2}' >> ns_train.list
+
+cat /home/speech/musan/noise_split.list | shuf | \
+  awk 'NR<=74{print "test "$1} NR>74&&NR<=148{print "valid "$1} NR>148{print "train "$1}' > .list
+cat .list | grep "^test" | awk '{print $2}' >> ns_test.list
+cat .list | grep "^valid" | awk '{print $2}' >> ns_valid.list
+cat .list | grep "^train" | awk '{print $2}' >> ns_train.list
+
+cat ~/wsj0/mix_2_spk_tr.txt | grep -o "[0-9a-zA-Z/_]*.wav" \
+  | sort | uniq | sed 's#^#/home/speech/wsj0/wav/#g' > train.list
+
+cat ~/wsj0/mix_2_spk_cv.txt | grep -o "[0-9a-zA-Z/_]*.wav" \
+  | sort | uniq | sed 's#^#/home/speech/wsj0/wav/#g' > valid.list
+
+cat ~/wsj0/mix_2_spk_tt.txt | grep -o "[0-9a-zA-Z/_]*.wav" \
+  | sort | uniq | sed 's#^#/home/speech/wsj0/wav/#g' > test.list
+
+rm .list
