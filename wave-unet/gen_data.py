@@ -22,7 +22,7 @@ if args.lpf_ratio < 0. or args.lpf_ratio > 1.: sys.exit(0)
 if args.paug_ratio < 0. or args.paug_ratio > 1.: sys.exit(0)
 
 if args.apply_jointb:
-  import jointbilatFil
+  import img_filter
   import librosa
 
   def magnitude(e): return np.abs(e)
@@ -93,7 +93,7 @@ def add_noise(pcm, noise, snr_db):
     m_ns = magnitude(f_ns); ph_ns = phase(f_ns)
     m_ns = librosa.amplitude_to_db(m_ns)
 
-    m_ns_new = jointbilatFil.jointBilateralFilter(
+    m_ns_new = img_filter.jointbf_filter(
       np.expand_dims(m_ns, -1), np.expand_dims(m_orig, -1))
     m_ns_new = np.squeeze(m_ns_new, -1)
     m_ns_new = librosa.db_to_amplitude(m_ns_new)

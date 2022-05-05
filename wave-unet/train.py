@@ -14,14 +14,17 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--tfrec", type=str, required=True) 
 parser.add_argument("--val-tfrec", type=str, required=False, default=None)
-parser.add_argument("--batch-size", type=int, required=False, default=3) 
+parser.add_argument("--batch-size", type=int, required=False, default=8) 
 parser.add_argument("--eval-step", type=int, required=False, default=100) 
 parser.add_argument("--save-step", type=int, required=False, default=1000) 
 parser.add_argument("--val-step", type=int, required=False, default=5000) 
-parser.add_argument("--train-step", type=int, required=False, default=1000000) 
-parser.add_argument("--begin-lr", type=float, required=False, default=1e-3) 
+parser.add_argument("--train-step", type=int, required=False, default=100000) 
+parser.add_argument("--begin-lr", type=float, required=False, default=1e-4) 
+parser.add_argument("--lr-decay-rate", type=float, required=False, default=0.96)
+parser.add_argument("--lr-decay-step", type=float, required=False, default=2000.)
 parser.add_argument("--val-lr-update", type=float, required=False, default=3) 
 parser.add_argument("--output", type=str, required=True) 
+parser.add_argument("--warm-start", type=str, required=False, default=None) 
 args = parser.parse_args()
 
 import json
@@ -81,8 +84,6 @@ if args.val_tfrec is not None:
     batch_size=args.batch_size, seed=seed)
 
 lr = tf.Variable(args.begin_lr, trainable=False)
-# lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-#   lr, decay_steps=1000, decay_rate=0.96, staircase=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
 import model
@@ -128,17 +129,49 @@ logger.addHandler(fh)
 ckpt = tf.train.Checkpoint(m)
 prev_val_loss = None; stall_cnt = 0
 
+init_epoch = 0
+if args.warm_start is not None:
+  logger.info("warm start from {}".format(args.warm_start))
+
+  expdir = os.path.abspath(os.path.dirname(args.warm_start))
+  expname = expdir.split("/")[-1]
+  init_epoch = os.path.basename(args.warm_start).replace(".", "-").split("-")[1]
+  init_epoch = int(init_epoch)
+
+  opt_weight = os.path.join(expdir, "adam-{}-weight.npy".format(init_epoch))
+  opt_cfg = os.path.join(expdir, "adam-{}-config.npy".format(init_epoch))
+
+  opt_weight = np.load(opt_weight, allow_pickle=True)
+  opt_cfg = np.load(opt_cfg, allow_pickle=True).flatten()[0] 
+
+  _in = np.zeros((args.batch_size, samp_len), dtype=np.float32)
+  _ = m((_in, None))
+  ckpt.read(args.warm_start)
+
+  opt = tf.keras.optimizers.Adam.from_config(opt_cfg)
+  lr.assign(opt_cfg["learning_rate"])
+
+  grad_vars = m.trainable_weights
+  zero_grads = [tf.zeros_like(w) for w in grad_vars]
+  opt.apply_gradients(zip(zero_grads, grad_vars))
+  opt.set_weights(opt_weight)
+
 for idx, data in enumerate(dataset):
+  idx += init_epoch
   if idx > args.train_step: break
 
   loss = run_step(tf.cast(idx, tf.int64), data["pcm"], data["ref"])
   log_writer.flush()
 
-  if idx > 0 and idx % args.eval_step == 0:
+  if idx > init_epoch and idx % args.eval_step == 0:
     logger.info("gstep[{}] loss[{:.2f}] lr[{:.2e}]".format(
       idx, loss, lr.numpy()))
 
-  if val_dataset is not None and (idx > 0 and idx % args.val_step == 0):
+  if val_dataset is None:
+    # follow tf.keras.optimizers.schedules.ExponentialDecay
+    lr.assign(args.begin_lr * args.lr_decay_rate**(idx/args.lr_decay_step))
+
+  elif idx > init_epoch and idx % args.val_step == 0:
     val_loss = 0; num_val = 0
     for val_data in val_dataset:
       val_loss += run_step(tf.cast(idx, tf.int64),
@@ -160,7 +193,7 @@ for idx, data in enumerate(dataset):
       idx, val_loss, lr.numpy()))
     prev_val_loss = min(prev_val_loss, val_loss)
 
-  if idx > 0 and idx % args.save_step == 0:
+  if idx > init_epoch and idx % args.save_step == 0:
     modelname = "model-{}.ckpt".format(idx)
     modelpath = os.path.join(args.output, modelname)
     ckpt.write(modelpath)
