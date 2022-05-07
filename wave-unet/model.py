@@ -9,9 +9,10 @@ tf_expd = tf.expand_dims
 class waveunet(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
     super(waveunet, self).__init__(*args, **kwargs)
-    self.layer = 8
-    self.dims = [64, 64, 64, 64, 128, 128, 128, 128]
-    self.ksize = 5
+    self.layer = 4
+    self.dims = [32, 32, 32, 32]
+    self.ksize = 16
+    self.sublayer = 4
 
   def build(self, input_shape):
     conv_opt = dict(padding='same')
@@ -22,14 +23,14 @@ class waveunet(tf.keras.layers.Layer):
     self.down_convs = list(zip(
       [conv1d(self.dims[idx], 3,
         strides=2, **conv_opt) for idx in range(self.layer)],
-      [conv1d(self.dims[idx], self.ksize,
-        strides=1, **conv_opt) for idx in range(self.layer)]))
+      [[conv1d(None, self.ksize,
+        strides=1, **conv_opt) for _ in range(self.sublayer)] for idx in range(self.layer)]))
 
     self.up_convs = list(zip(
       [conv1dtrans(self.dims[::-1][idx], 3,
         strides=2, **conv_opt) for idx in range(self.layer)],
-      [conv1d(self.dims[::-1][idx], self.ksize,
-        strides=1, **conv_opt) for idx in range(self.layer)]))
+      [[conv1d(None, self.ksize,
+        strides=1, **conv_opt) for _ in range(self.sublayer)] for idx in range(self.layer)]))
 
     self.conv_mid = conv1d(self.dims[-1], self.ksize, **conv_opt)
 
@@ -40,18 +41,20 @@ class waveunet(tf.keras.layers.Layer):
     x = tf.nn.relu(self.conv_pre(x))
 
     encs = []
-    for down_conv, conv in self.down_convs:
-      x = tf.nn.relu(conv(x))
+    for down_conv, convs in self.down_convs:
+      for conv in convs:
+        x = tf.nn.relu(conv(x)) + x
       encs.append(x)
       x = tf.nn.relu(down_conv(x))
 
     x = self.conv_mid(x)
 
     encs = encs[::-1]
-    for enc, (up_conv, conv) in zip(encs, self.up_convs):
+    for enc, (up_conv, convs) in zip(encs, self.up_convs):
       x = tf.nn.relu(up_conv(x))
       x = tf.concat([x, enc], -1)
-      x = tf.nn.relu(conv(x))
+      for conv in convs:
+        x = tf.nn.relu(conv(x)) + x
     
     x = self.conv_post(x)
     x = tf.math.tanh(x)
@@ -81,4 +84,4 @@ class waveunet(tf.keras.layers.Layer):
 
       return samp_loss + spec_loss
 
-    return x
+    return x, encs

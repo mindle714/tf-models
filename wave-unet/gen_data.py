@@ -110,7 +110,7 @@ def get_feat(_pcm, _samp_len,
   _ref = copy.deepcopy(_pcm)
   if do_add_noise: _pcm = add_noise(_pcm, noise, snr_db)
   if do_lpf: _pcm = lpf.lowpass(_pcm, lpf_thres) 
-  if do_paug: _pcm = paug.pattern_mask(_pcm) 
+  if do_paug: _pcm = paug.pattern_mask(_pcm, fmin=.5) 
 
   ref_feat = tf.train.Feature(float_list=tf.train.FloatList(value=_ref))
   pcm_feat = tf.train.Feature(float_list=tf.train.FloatList(value=_pcm))
@@ -208,6 +208,12 @@ with open(args_file, "w") as f:
   f.write(json.dumps(vars(args)))
 os.chmod(args_file, S_IREAD|S_IRGRP|S_IROTH)
 
+import types
+specs = [val.__spec__ for name, val in sys.modules.items() \
+  if isinstance(val, types.ModuleType) and not ('_main_' in name)]
+origins = [spec.origin for spec in specs if spec is not None]
+origins = [e for e in origins if e is not None and os.getcwd() in e]
+
 import shutil
-for origin in [os.path.abspath(__file__), args.train_list]:
-  shutil.copy(origin, args.output)
+for origin in origins + [os.path.abspath(__file__), args.train_list]:
+  shutil.copy(origin, args.output, follow_symlinks=True)

@@ -12,7 +12,9 @@ while getopts ":e:" opt; do
 done
 
 if [ -z ${exps+x} ]; then
-  echo "$USAGE"; echo "$EXAMPLE"; exit 2
+  for exp in exps/*/; do
+    exps+=($(echo $exp | rev | cut -d/ -f2 | rev));
+  done
 fi
 
 opts=""
@@ -22,4 +24,5 @@ for e in "${exps[@]}"; do
   fi
 done
 opts="$(echo $opts | sed 's/^,//g')"
+echo "tensorboard --host 0.0.0.0 --logdir_spec $opts"
 tensorboard --host 0.0.0.0 --logdir_spec $opts

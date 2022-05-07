@@ -70,6 +70,7 @@ class conv1d(tf.keras.layers.Layer):
     if "kernel_initializer" not in self.conv_kwargs:
       self.conv_kwargs["kernel_initializer"] = kernel_init
 
+    if self.conv_args[0] is None: self.conv_args = (dim, self.conv_args[1])
     self.conv = tf.keras.layers.Conv1D(*self.conv_args, **self.conv_kwargs)
 
     if isinstance(input_shape, tuple):
@@ -112,6 +113,7 @@ class conv1dtrans(tf.keras.layers.Layer):
     if "kernel_initializer" not in self.conv_kwargs:
       self.conv_kwargs["kernel_initializer"] = kernel_init
 
+    if self.conv_args[0] is None: self.conv_args = (dim, self.conv_args[1])
     self.conv = tf.keras.layers.Conv1DTranspose(*self.conv_args, **self.conv_kwargs)
     
     if isinstance(input_shape, tuple):

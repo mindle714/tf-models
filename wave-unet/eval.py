@@ -1,9 +1,14 @@
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--ckpt", type=str, required=True) 
-parser.add_argument("--eval-list", type=str, required=False, default="wsj0_test_lpf/pcm_ref.list") 
+parser.add_argument("--eval-dir", type=str, required=True)
 parser.add_argument("--save-result", action="store_true") 
 args = parser.parse_args()
+
+import os
+evalname = [e for e in args.eval_dir.split("/") if e][-1]
+eval_list = os.path.join(args.eval_dir, "pcm_ref.list")
+assert os.path.isfile(eval_list)
 
 import tensorflow as tf
 gpus = tf.config.list_physical_devices('GPU')
@@ -18,7 +23,6 @@ if gpus:
     # Memory growth must be set before GPUs have been initialized
     print(e)
 
-import os
 import sys
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
@@ -52,13 +56,15 @@ import warnings
 import soundfile
 import tqdm
 
-evals = [e.strip().split() for e in open(args.eval_list, "r").readlines()]
-with open("{}-{}.eval".format(expname, epoch), "w") as f:
+resname = "{}-{}-{}".format(evalname, expname, epoch)
+evals = [e.strip().split() for e in open(eval_list, "r").readlines()]
+with open("{}.eval".format(resname), "w") as f:
   pcount = 0; snr_tot = 0
 
   for idx, (_pcm, _ref) in enumerate(evals):
     pcm, _ = soundfile.read(_pcm)
     ref, _ = soundfile.read(_ref)
+    pcm_len = pcm.shape[0]
 
     ref = ref.reshape([1,ref.shape[0],1]).astype(np.float32)
     pcm = np.expand_dims(pcm, 0).astype(np.float32)
@@ -69,15 +75,26 @@ with open("{}-{}.eval".format(expname, epoch), "w") as f:
         return pcm
       return pcm
 
-    hyp = m((pad(pcm), None), training=False)
+    hyp, encs = m((pad(pcm), None), training=False)
+    hyp = np.squeeze(hyp)[:pcm_len]
+
+    import librosa
+    import librosa.display
+    for eidx, enc in enumerate(encs):
+      import matplotlib.pyplot as plt
+      fig = plt.figure(figsize=(19.2, 4.8))
+      librosa.display.specshow(np.log(np.squeeze(enc)+1e-9).T, x_axis='time', y_axis='linear')
+      plt.colorbar()
+      plt.savefig("{}_hyp_enc{}_{}.png".format(resname, eidx, idx))
+
     if idx < 2:
       import viz
-      soundfile.write("{}-{}_orig_{}.wav".format(expname, epoch, idx), np.squeeze(pcm), 16000)
-      soundfile.write("{}-{}_hyp_{}.wav".format(expname, epoch, idx), np.squeeze(hyp), 16000)
-      soundfile.write("{}-{}_ref_{}.wav".format(expname, epoch, idx), np.squeeze(ref), 16000)
-      viz.plot_spec(np.squeeze(pcm), "{}-{}_orig_{}".format(expname, epoch, idx), 16000)
-      viz.plot_spec(np.squeeze(hyp), "{}-{}_hyp_{}".format(expname, epoch, idx), 16000)
-      viz.plot_spec(np.squeeze(ref), "{}-{}_ref_{}".format(expname, epoch, idx), 16000)
+      soundfile.write("{}_orig_{}.wav".format(resname, idx), np.squeeze(pcm), 16000)
+      soundfile.write("{}_hyp_{}.wav".format(resname, idx), hyp, 16000)
+      soundfile.write("{}_ref_{}.wav".format(resname, idx), np.squeeze(ref), 16000)
+      viz.plot_spec(np.squeeze(pcm), "{}_orig_{}".format(resname, idx), 16000)
+      viz.plot_spec(hyp, "{}_hyp_{}".format(resname, idx), 16000)
+      viz.plot_spec(np.squeeze(ref), "{}_ref_{}".format(resname, idx), 16000)
     else:
       break
 
