@@ -6,6 +6,85 @@ from util import *
 tf_sum = tf.math.reduce_sum
 tf_expd = tf.expand_dims
 
+class pdisc(tf.keras.layers.Layer):
+  def __init__(self, period, ksize, stride, **kwargs):
+    super(pdisc, self).__init__(**kwargs)
+    self.period = period
+    self.ksize = ksize
+    self.stride = stride
+  
+  def build(self, input_shape):
+    conv_opt = dict(padding='same')
+
+    self.convs = [
+      conv2d(32, (self.ksize, 1), strides=(self.stride, 1), **conv_opt),
+      conv2d(32, (self.ksize, 1), strides=(self.stride, 1), **conv_opt),
+      conv2d(64, (self.ksize, 1), strides=(self.stride, 1), **conv_opt),
+      conv2d(128, (self.ksize, 1), strides=(self.stride, 1), **conv_opt),
+      conv2d(128, (self.ksize, 1), strides=1, **conv_opt)]
+
+    self.conv_post = conv2d(1, (3, 1), strides=1, **conv_opt)
+
+  def call(self, inputs, training=None):
+    x = inputs
+
+    x_shape = tf.shape(x)
+    mod = tf.math.floormod(x_shape[-1], self.period)
+    x = tf.pad(x, [[0, 0], [0, self.period-mod]])
+
+    x = tf.reshape(x, [x_shape[0],
+      x_shape[1]//self.period + 1, self.period])
+
+    x = tf_expd(x, -1)
+    for conv in self.convs:
+      x = tf.nn.relu(conv(x))
+
+    x = self.conv_post(x)
+    x = tf.squeeze(x, -1)
+    x = tf.math.reduce_mean(x, -1)
+    x = tf.math.sigmoid(x)
+
+    return x
+
+class sdisc(tf.keras.layers.Layer):
+  def __init__(self, ksize, stride, **kwargs):
+    super(sdisc, self).__init__(**kwargs)
+    self.ksize = ksize
+    self.stride = stride
+  
+  def build(self, input_shape):
+    conv_opt = dict(padding='same')
+
+    self.pool = tf.keras.layers.AveragePooling1D(
+      self.ksize, self.stride)
+
+    self.convs = [
+      conv1d(32, 15, strides=1, **conv_opt),
+      conv1d(32, 41, strides=2, groups=4, **conv_opt),
+      conv1d(32, 41, strides=2, groups=16, **conv_opt),
+      conv1d(64, 41, strides=4, groups=16, **conv_opt),
+      conv1d(128, 41, strides=4, groups=16, **conv_opt),
+      conv1d(128, 41, strides=1, groups=16, **conv_opt),
+      conv1d(128, 5, strides=1, **conv_opt)]
+
+    self.conv_post = conv1d(1, 3, strides=1, **conv_opt)
+
+  def call(self, inputs, training=None):
+    x = inputs
+
+    x = tf_expd(x, -1)
+    x = self.pool(x)
+
+    for conv in self.convs:
+      x = tf.nn.relu(conv(x))
+
+    x = self.conv_post(x)
+    x = tf.squeeze(x, -1)
+    x = tf.math.reduce_mean(x, -1)
+    x = tf.math.sigmoid(x)
+   
+    return x
+
 class waveunet(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
     super(waveunet, self).__init__(*args, **kwargs)
@@ -82,6 +161,45 @@ class waveunet(tf.keras.layers.Layer):
       spec_loss += stft_loss(x, ref, 50, 10, 2048)
       spec_loss += stft_loss(x, ref, 10, 2, 512)
 
-      return samp_loss + spec_loss
+      return x, samp_loss + spec_loss
 
     return x, encs
+
+class wavegan(tf.keras.layers.Layer):
+  def __init__(self, *args, **kwargs):
+    super(wavegan, self).__init__(*args, **kwargs)
+  
+  def build(self, input_shape):
+    self.gen = waveunet()
+
+    self.mpdisc = [
+      pdisc(2, 5, 3),
+      pdisc(3, 5, 3),
+      pdisc(5, 5, 3),
+      pdisc(7, 5, 3),
+      pdisc(11, 5, 3)]
+
+    self.msdisc = [
+      sdisc(1, 1),
+      sdisc(4, 2),
+      sdisc(4, 2)]
+
+  def call(self, inputs, training=None):
+    x, ref = inputs
+
+    hyp, gen_loss = self.gen((x, ref))
+    if ref is None:
+      return hyp, None, None
+
+    disc_losses = []
+    for _disc in self.mpdisc + self.msdisc:
+      hyp_d = _disc(hyp); ref_d = _disc(ref)
+
+      gen_loss += tf.math.reduce_mean((1-hyp_d)**2)
+
+      disc_loss = tf.math.reduce_mean((hyp_d)**2)
+      disc_loss += tf.math.reduce_mean((1-ref_d)**2)
+      disc_losses.append(disc_loss)
+
+    disc_loss = sum(disc_losses)
+    return hyp, gen_loss, disc_loss

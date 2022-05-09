@@ -84,10 +84,11 @@ if args.val_tfrec is not None:
     batch_size=args.batch_size, seed=seed)
 
 lr = tf.Variable(args.begin_lr, trainable=False)
-opt = tf.keras.optimizers.Adam(learning_rate=lr)
+gen_opt = tf.keras.optimizers.Adam(learning_rate=lr)
+disc_opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
 import model
-m = model.waveunet()
+m = model.wavegan()
 
 specs = [val.__spec__ for name, val in sys.modules.items() \
   if isinstance(val, types.ModuleType) and not ('_main_' in name)]
@@ -105,17 +106,25 @@ log_writer.set_as_default()
 
 @tf.function
 def run_step(step, pcm, ref, training=True):
-  with tf.GradientTape() as tape, log_writer.as_default():
-    loss = m((pcm, ref), training=training)
-    loss = tf.math.reduce_mean(loss)
-    tf.summary.scalar("loss", loss, step=step)
+  with tf.GradientTape(persistent=True) as tape, log_writer.as_default():
+    _, gen_loss, disc_loss = m((pcm, ref), training=training)
+    tf.summary.scalar("gen_loss", gen_loss, step=step)
+    tf.summary.scalar("disc_loss", disc_loss, step=step)
 
   if training:
-    grads = tape.gradient(loss, m.trainable_weights)
-    grads, _ = tf.clip_by_global_norm(grads, 5.)
-    opt.apply_gradients(zip(grads, m.trainable_weights))
+    gen_vars = [e for e in m.trainable_weights if 'waveunet' in e.name]
+    disc_vars = [e for e in m.trainable_weights if 'disc' in e.name]
+    assert (len(gen_vars) + len(disc_vars)) == len(m.trainable_weights)
 
-  return loss
+    gen_grads = tape.gradient(gen_loss, gen_vars)
+    gen_grads, _ = tf.clip_by_global_norm(gen_grads, 5.)
+    gen_opt.apply_gradients(zip(gen_grads, gen_vars))
+
+    disc_grads = tape.gradient(disc_loss, disc_vars)
+    disc_grads, _ = tf.clip_by_global_norm(disc_grads, 5.)
+    disc_opt.apply_gradients(zip(disc_grads, disc_vars))
+
+  return gen_loss, disc_loss
 
 import logging
 logger = tf.get_logger()
@@ -138,34 +147,49 @@ if args.warm_start is not None:
   init_epoch = os.path.basename(args.warm_start).replace(".", "-").split("-")[1]
   init_epoch = int(init_epoch)
 
-  opt_weight = os.path.join(expdir, "adam-{}-weight.npy".format(init_epoch))
-  opt_cfg = os.path.join(expdir, "adam-{}-config.npy".format(init_epoch))
+  gen_opt_weight = os.path.join(expdir, "adam-gen-{}-weight.npy".format(init_epoch))
+  gen_opt_cfg = os.path.join(expdir, "adam-gen-{}-config.npy".format(init_epoch))
 
-  opt_weight = np.load(opt_weight, allow_pickle=True)
-  opt_cfg = np.load(opt_cfg, allow_pickle=True).flatten()[0] 
+  gen_opt_weight = np.load(gen_opt_weight, allow_pickle=True)
+  gen_opt_cfg = np.load(gen_opt_cfg, allow_pickle=True).flatten()[0] 
+
+  disc_opt_weight = os.path.join(expdir, "adam-disc-{}-weight.npy".format(init_epoch))
+  disc_opt_cfg = os.path.join(expdir, "adam-disc-{}-config.npy".format(init_epoch))
+
+  disc_opt_weight = np.load(disc_opt_weight, allow_pickle=True)
+  disc_opt_cfg = np.load(disc_opt_cfg, allow_pickle=True).flatten()[0] 
 
   _in = np.zeros((args.batch_size, samp_len), dtype=np.float32)
-  _ = m((_in, None))
+  _ = m((_in, _in))
   ckpt.read(args.warm_start)
 
-  opt = tf.keras.optimizers.Adam.from_config(opt_cfg)
-  lr.assign(opt_cfg["learning_rate"])
+  gen_opt = tf.keras.optimizers.Adam.from_config(gen_opt_cfg)
+  disc_opt = tf.keras.optimizers.Adam.from_config(disc_opt_cfg)
 
-  grad_vars = m.trainable_weights
-  zero_grads = [tf.zeros_like(w) for w in grad_vars]
-  opt.apply_gradients(zip(zero_grads, grad_vars))
-  opt.set_weights(opt_weight)
+  assert gen_opt_cfg["learning_rate"] == disc_opt_cfg["learning_rate"]
+  lr.assign(gen_opt_cfg["learning_rate"])
+
+  gen_vars = [e for e in m.trainable_weights if 'waveunet' in e.name]
+  disc_vars = [e for e in m.trainable_weights if 'disc' in e.name]
+  
+  gen_zero_grads = [tf.zeros_like(w) for w in gen_vars]
+  gen_opt.apply_gradients(zip(gen_zero_grads, gen_vars))
+  gen_opt.set_weights(gen_opt_weight)
+
+  disc_zero_grads = [tf.zeros_like(w) for w in disc_vars]
+  disc_opt.apply_gradients(zip(disc_zero_grads, disc_vars))
+  disc_opt.set_weights(disc_opt_weight)
 
 for idx, data in enumerate(dataset):
   idx += init_epoch
   if idx > args.train_step: break
 
-  loss = run_step(tf.cast(idx, tf.int64), data["pcm"], data["ref"])
+  gen_loss, disc_loss = run_step(tf.cast(idx, tf.int64), data["pcm"], data["ref"])
   log_writer.flush()
 
   if idx > init_epoch and idx % args.eval_step == 0:
-    logger.info("gstep[{}] loss[{:.2f}] lr[{:.2e}]".format(
-      idx, loss, lr.numpy()))
+    logger.info("gstep[{}] gen_loss[{:.2f}] disc_loss[{:.2f}] lr[{:.2e}]".format(
+      idx, gen_loss, disc_loss, lr.numpy()))
 
   if val_dataset is None:
     # follow tf.keras.optimizers.schedules.ExponentialDecay
@@ -198,12 +222,20 @@ for idx, data in enumerate(dataset):
     modelpath = os.path.join(args.output, modelname)
     ckpt.write(modelpath)
 
-    optname = "adam-{}-weight".format(idx)
+    optname = "adam-gen-{}-weight".format(idx)
     optpath = os.path.join(args.output, optname)
-    np.save(optpath, opt.get_weights())
+    np.save(optpath, gen_opt.get_weights())
     
-    cfgname = "adam-{}-config".format(idx)
+    cfgname = "adam-gen-{}-config".format(idx)
     cfgpath = os.path.join(args.output, cfgname)
-    np.save(cfgpath, opt.get_config())
+    np.save(cfgpath, gen_opt.get_config())
+
+    optname = "adam-disc-{}-weight".format(idx)
+    optpath = os.path.join(args.output, optname)
+    np.save(optpath, disc_opt.get_weights())
+    
+    cfgname = "adam-disc-{}-config".format(idx)
+    cfgpath = os.path.join(args.output, cfgname)
+    np.save(cfgpath, disc_opt.get_config())
 
     logger.info("model is saved as {}".format(modelpath))

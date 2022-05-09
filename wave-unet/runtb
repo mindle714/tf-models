@@ -25,4 +25,4 @@ for e in "${exps[@]}"; do
 done
 opts="$(echo $opts | sed 's/^,//g')"
 echo "tensorboard --host 0.0.0.0 --logdir_spec $opts"
-tensorboard --host 0.0.0.0 --logdir_spec $opts
+CUDA_VISIBLE_DEVICES=-1 tensorboard --host 0.0.0.0 --logdir_spec $opts

@@ -136,6 +136,9 @@ class conv1dtrans(tf.keras.layers.Layer):
     x = inputs
     return self.conv(x)
 
+conv2d = tf.keras.layers.Conv2D
+conv2dtrans = tf.keras.layers.Conv2DTranspose
+
 class gnorm(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
     super(gnorm, self).__init__(*args, **kwargs)
