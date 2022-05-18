@@ -1,5 +1,6 @@
 #!/bin/bash
 
+if false; then
 cat /home/speech/demand/16k_split.list | shuf | \
   awk 'NR<=272{print "test "$1} NR>272&&NR<=544{print "valid "$1} NR>544{print "train "$1}' > .list
 cat .list | grep "^test" | awk '{print $2}' > ns_test.list
@@ -28,3 +29,30 @@ cat ~/wsj0/mix_2_spk_tt.txt | grep -o "[0-9a-zA-Z/_]*.wav" \
   | sort | uniq | sed 's#^#/home/speech/wsj0/wav/#g' > test.list
 
 rm .list
+
+find ~/ljspeech/wavs/ -name "*.wav" | shuf | \
+  awk 'NR<=1310{print "test "$1} NR>1310&&NR<=2620{print "valid "$1} NR>2620{print "train "$1}' > .list
+cat .list | grep "^test" | awk '{print $2}' > ljs_test.list
+cat .list | grep "^valid" | awk '{print $2}' > ljs_valid.list
+cat .list | grep "^train" | awk '{print $2}' > ljs_train.list
+
+rm .list
+
+paste <(cat train.list | cut -d/ -f8) train.list | \
+  sort -k1 | awk '
+    BEGIN{prev=""; numspk=0; numwav=0} {
+      if(prev!=$1 && prev!=""){
+        numspk+=1; numwav=0
+      } 
+      if(numspk<10){
+        if(numwav<9) print "test "$2;
+        else print "train "$2;
+      }
+      prev=$1
+      numwav+=1
+    }' > .list
+cat .list | grep "^test" | awk '{print $2}' > test_spk10.list
+cat .list | grep "^train" | awk '{print $2}' > train_spk10.list
+
+rm .list
+fi

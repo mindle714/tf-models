@@ -1,0 +1,73 @@
+#!/bin/bash
+
+if false; then
+spks="$(cat train_spk10.list | cut -d/ -f8 | uniq)"
+
+idx=0
+for spk in $spks; do
+  paste <(cat train_spk10.list | cut -d/ -f8) train_spk10.list | \
+    grep "^$spk" | awk '{print $2}' > .list
+
+  ratio="$(echo $idx | awk '{print 0.3+$1*0.044}')"
+
+  python3 gen_data.py --train-list .list --noise-list ns_train.list \
+    --noise-ratio 0. --lpf-ratio 1. --lpf-min-thres $ratio \
+    --lpf-max-thres $ratio --samp-len 16384 --output .${idx}_tfrec
+
+  idx=$((idx+1))
+done
+
+mkdir wsj0_spk10_lpfps
+
+idx=0
+for spk in $spks; do
+  cp .${idx}_tfrec/noise.list wsj0_spk10_lpfps/noise_${idx}.list
+  cp .${idx}_tfrec/ARGS wsj0_spk10_lpfps/ARGS_${idx}
+  cp .${idx}_tfrec/.list wsj0_spk10_lpfps/train_spk10_${idx}.list
+  
+  cp lpf.py paug.py gen_data.py wsj0_spk10_lpfps/
+
+  for tfrec in .${idx}_tfrec/train*tfrecord; do
+    bname="$(echo $tfrec | cut -d/ -f2 | cut -d. -f1)"
+    cp $tfrec wsj0_spk10_lpfps/${bname}_${idx}.tfrecord
+  done
+
+  rm -rf .${idx}_tfrec/
+  idx=$((idx+1))
+done
+fi
+
+spks="$(cat train.list | cut -d/ -f8 | uniq)"
+
+idx=0
+for spk in $spks; do
+  paste <(cat train.list | cut -d/ -f8) train.list | \
+    grep "^$spk" | awk '{print $2}' > .list
+
+  ratio="$(echo $idx | awk '{print 0.3+$1*0.004}')"
+
+  python3 gen_data.py --train-list .list --noise-list ns_train.list \
+    --noise-ratio 0. --lpf-ratio 1. --lpf-min-thres $ratio \
+    --lpf-max-thres $ratio --samp-len 16384 --output .${idx}_tfrec
+
+  idx=$((idx+1))
+done
+
+mkdir wsj0_lpfps
+
+idx=0
+for spk in $spks; do
+  cp .${idx}_tfrec/noise.list wsj0_lpfps/noise_${idx}.list
+  cp .${idx}_tfrec/ARGS wsj0_lpfps/ARGS_${idx}
+  cp .${idx}_tfrec/.list wsj0_lpfps/train_${idx}.list
+  
+  cp lpf.py paug.py gen_data.py wsj0_lpfps/
+
+  for tfrec in .${idx}_tfrec/train*tfrecord; do
+    bname="$(echo $tfrec | cut -d/ -f2 | cut -d. -f1)"
+    cp $tfrec wsj0_lpfps/${bname}_${idx}.tfrecord
+  done
+
+  rm -rf .${idx}_tfrec/
+  idx=$((idx+1))
+done
