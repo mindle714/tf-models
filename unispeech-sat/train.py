@@ -5,7 +5,7 @@ import tensorflow as tf
 
 seed = 1234
 os.environ['PYTHONHASHSEED'] = str(seed)
-#os.environ['TF_DETERMINISTIC_OPS'] = '1'
+os.environ['TF_DETERMINISTIC_OPS'] = '1'
 random.seed(seed)
 np.random.seed(seed)
 tf.random.set_seed(seed)
@@ -86,8 +86,8 @@ if args.val_tfrec is not None:
 lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
-import model
-m = model.waveunet()
+import unisat
+m = unisat.unisat_unet()
 
 specs = [val.__spec__ for name, val in sys.modules.items() \
   if isinstance(val, types.ModuleType) and not ('_main_' in name)]
@@ -106,11 +106,10 @@ log_writer.set_as_default()
 @tf.function
 def run_step(step, pcm, ref, training=True):
   with tf.GradientTape() as tape, log_writer.as_default():
-    loss, conv_loss = m((pcm, ref), training=training)
+    loss = m((pcm, ref), training=training)
     loss = tf.math.reduce_mean(loss)
     tf.summary.scalar("loss", loss, step=step)
-    tf.summary.scalar("conv_loss", conv_loss, step=step)
-    total_loss = loss + conv_loss
+    total_loss = loss
 
   if training:
     grads = tape.gradient(total_loss, m.trainable_weights)
@@ -138,25 +137,30 @@ if args.warm_start is not None:
   expdir = os.path.abspath(os.path.dirname(args.warm_start))
   expname = expdir.split("/")[-1]
   init_epoch = os.path.basename(args.warm_start).replace(".", "-").split("-")[1]
-  init_epoch = int(init_epoch)
+  try:
+    init_epoch = int(init_epoch)
+  except:
+    init_epoch = 0
 
   opt_weight = os.path.join(expdir, "adam-{}-weight.npy".format(init_epoch))
   opt_cfg = os.path.join(expdir, "adam-{}-config.npy".format(init_epoch))
 
-  opt_weight = np.load(opt_weight, allow_pickle=True)
-  opt_cfg = np.load(opt_cfg, allow_pickle=True).flatten()[0] 
+  if os.path.isfile(opt_cfg):
+    opt_weight = np.load(opt_weight, allow_pickle=True)
+    opt_cfg = np.load(opt_cfg, allow_pickle=True).flatten()[0] 
 
   _in = np.zeros((args.batch_size, samp_len), dtype=np.float32)
   _ = m((_in, None))
   ckpt.read(args.warm_start)
 
-  opt = tf.keras.optimizers.Adam.from_config(opt_cfg)
-  lr.assign(opt_cfg["learning_rate"])
+  if os.path.isfile(opt_cfg):
+    opt = tf.keras.optimizers.Adam.from_config(opt_cfg)
+    lr.assign(opt_cfg["learning_rate"])
 
-  grad_vars = m.trainable_weights
-  zero_grads = [tf.zeros_like(w) for w in grad_vars]
-  opt.apply_gradients(zip(zero_grads, grad_vars))
-  opt.set_weights(opt_weight)
+    grad_vars = m.trainable_weights
+    zero_grads = [tf.zeros_like(w) for w in grad_vars]
+    opt.apply_gradients(zip(zero_grads, grad_vars))
+    opt.set_weights(opt_weight)
 
 for idx, data in enumerate(dataset):
   idx += init_epoch

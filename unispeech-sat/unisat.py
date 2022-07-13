@@ -1,5 +1,8 @@
 import tensorflow as tf
-import util
+from util import *
+
+tf_sum = tf.math.reduce_sum
+tf_expd = tf.expand_dims
 
 class gnormconv1d(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
@@ -7,7 +10,7 @@ class gnormconv1d(tf.keras.layers.Layer):
 
   def build(self, input_shape):
     self.conv = tf.keras.layers.Conv1D(512, kernel_size=10, strides=5, use_bias=False)
-    self.norm = util.gnorm(512)
+    self.norm = gnorm(512)
     self.gelu = tf.keras.activations.gelu
   
   def call(self, inputs, training=None):
@@ -46,7 +49,7 @@ class featproj(tf.keras.layers.Layer):
     super(featproj, self).__init__()
 
   def build(self, input_shape):
-    self.norm = util.lnorm()
+    self.norm = lnorm()
     self.proj = tf.keras.layers.Dense(768, use_bias=True)
     self.dropout = tf.keras.layers.Dropout(0)
   
@@ -138,9 +141,9 @@ class enclayer(tf.keras.layers.Layer):
   def build(self, input_shape):
     self.atten = attention()
     self.dropout = tf.keras.layers.Dropout(0)
-    self.norm = util.lnorm()
+    self.norm = lnorm()
     self.feed = feedforward()
-    self.out_norm = util.lnorm()
+    self.out_norm = lnorm()
 
   def call(self, inputs, training=None):
     x = inputs
@@ -158,7 +161,7 @@ class encoder(tf.keras.layers.Layer):
 
   def build(self, input_shape):
     self.emb = posconvemb()
-    self.norm = util.lnorm()
+    self.norm = lnorm()
     self.dropout = tf.keras.layers.Dropout(0)
     self.layers = [enclayer() for _ in range(12)]
   
@@ -167,9 +170,12 @@ class encoder(tf.keras.layers.Layer):
     x = x + self.emb(x)
     x = self.norm(x)
     x = self.dropout(x)
+
+    encs = []
     for layer in self.layers:
+      encs.append(x)
       x = layer(x)
-    return x
+    return x, encs
 
 class unisat(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
@@ -183,8 +189,8 @@ class unisat(tf.keras.layers.Layer):
   def call(self, inputs, training=None):
     x = inputs
     x = self.fp(self.fe(x))
-    x = self.enc(x)
-    return x
+    x, encs = self.enc(x)
+    return x, encs
 
 class unisat_seq(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
@@ -197,8 +203,94 @@ class unisat_seq(tf.keras.layers.Layer):
   
   def call(self, inputs, training=None):
     x = inputs
-    x = self.unisat(x)
+    x, encs = self.unisat(x)
     x = self.projector(x)
     x = tf.math.reduce_mean(x, 1)
     x = self.classifier(x)
+    return x
+
+class unisat_unet(tf.keras.layers.Layer):
+  def __init__(self, *args, **kwargs):
+    super(unisat_unet, self).__init__()
+    self.layer = 9
+    self.dims = [32, 32, 32, 32, 32, 32, 32, 32, 32]
+    self.ksize = 16
+    self.sublayer = 4
+
+  def build(self, input_shape):
+    conv_opt = dict(padding='same')
+    self.ref_len = input_shape[0][1]
+
+    self.unisat = unisat()
+
+    self.conv_mid = conv1d(self.dims[-1], self.ksize, **conv_opt)
+
+    self.up_convs = list(zip(
+      [conv1dtrans(self.dims[::-1][idx], 3,
+        strides=2, **conv_opt) for idx in range(self.layer)],
+      [[conv1d(None, self.ksize,
+        strides=1, **conv_opt) for _ in range(self.sublayer)] for idx in range(self.layer)]))
+    self.up_int_convs = [
+      conv1dtrans(self.dims[::-1][idx], 3,
+        strides=2, **conv_opt) for idx in range(self.layer)]
+
+    self.conv_post = conv1d(1, self.ksize, **conv_opt)
+  
+  def call(self, inputs, training=None):
+    x, ref = inputs
+
+    x = tf_expd(x, -1)
+    x, encs = self.unisat(x)
+    x = tf.nn.relu(x)
+    #x = tf.stop_gradient(x)
+
+    x = self.conv_mid(x)
+   
+    idx = 0; encs = encs[::-1]
+    for _enc, (up_conv, convs) in zip(encs, self.up_convs):
+      x = tf.nn.relu(up_conv(x))
+      
+      enc = _enc
+      for _idx in range(idx+1):
+        enc = tf.nn.relu(self.up_int_convs[_idx](enc))
+
+      #x = tf.concat([x, enc], -1)
+      x = x + enc
+      for conv in convs:
+        x = tf.nn.relu(conv(x)) + x
+      idx += 1
+    
+    x = self.conv_post(x)
+    x = tf.math.tanh(x)
+    x = tf.squeeze(x, -1)
+
+    pad = tf.shape(x)[1] - self.ref_len
+    lpad = pad // 2
+    rpad = pad - lpad
+    x = x[:, lpad:-rpad]
+
+    if ref is not None:
+      samp_loss = tf.math.reduce_mean((x - ref) ** 2)
+
+      def stft_loss(x, ref, frame_length, frame_step, fft_length):
+        stft_opt = dict(frame_length=frame_length,
+          frame_step=frame_step, fft_length=fft_length)
+        mag_x = tf.math.abs(stft(x, **stft_opt))
+        mag_ref = tf.math.abs(stft(ref, **stft_opt))
+
+        fro_opt = dict(axis=(-2, -1), ord='fro')
+        sc_loss = tf.norm(mag_x - mag_ref, **fro_opt) / (tf.norm(mag_x, **fro_opt) + 1e-9)
+        sc_loss = tf.reduce_mean(sc_loss)
+
+        mag_loss = tf.math.log(mag_x + 1e-9) - tf.math.log(mag_ref + 1e-9)
+        mag_loss = tf.reduce_mean(tf.math.abs(mag_loss))
+
+        return sc_loss + mag_loss
+
+      spec_loss = stft_loss(x, ref, 25, 5, 1024)
+      spec_loss += stft_loss(x, ref, 50, 10, 2048)
+      spec_loss += stft_loss(x, ref, 10, 2, 512)
+
+      return samp_loss + spec_loss
+
     return x

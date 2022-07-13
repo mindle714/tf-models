@@ -6,129 +6,218 @@ from util import *
 tf_sum = tf.math.reduce_sum
 tf_expd = tf.expand_dims
 
-class conv1d_v2(tf.keras.layers.Layer):
-  def __init__(self, *args, **kwargs):
-    self.conv_args = args
-    self.conv_kwargs = kwargs
-    super(conv1d_v2, self).__init__()
+def log10(x):
+  num = tf.math.log(x)
+  denom = tf.math.log(tf.constant(10, dtype=num.dtype))
+  return num / denom
+
+import itertools
+
+# ref[batch, timestep, mixture], hyp[..]
+def si_snr(ref, hyp, mask=None, pit=True, eps=1e-8):
+  def norm_mean(e):
+    if mask is not None:
+      m, _ = tf.nn.weighted_moments(e, [1], mask, keepdims=True)
+    else:
+      m, _ = tf.nn.moments(e, [1], keepdims=True)
+
+    return e - m
+
+  ref = norm_mean(ref)
+  hyp = norm_mean(hyp)
+
+  if pit:
+    ref = tf_expd(ref, -2)
+    hyp = tf_expd(hyp, -1)
+
+  if mask is not None:
+    mask = tf_expd(mask, -1)
+    # s_tgt = <s,s'>s/||s||^2
+    s_tgt = tf_sum((ref * hyp) * mask, 1, keepdims=True)
+    s_tgt = s_tgt * ref / (tf_sum((ref**2) * mask, 1, keepdims=True) + eps)
+  
+    e_ns = hyp - s_tgt
+    snr = tf_sum((s_tgt**2) * mask, 1) / (tf_sum((e_ns**2) * mask, 1) + eps)
+    snr = 10 * log10(snr)
+
+  else:
+    # s_tgt = <s,s'>s/||s||^2
+    s_tgt = tf_sum((ref * hyp), 1, keepdims=True)
+    s_tgt = s_tgt * ref / (tf_sum((ref**2), 1, keepdims=True) + eps)
+  
+    e_ns = hyp - s_tgt
+    snr = tf_sum((s_tgt**2), 1) / (tf_sum((e_ns**2), 1) + eps)
+    snr = 10 * log10(snr)
+
+  if pit:
+    num_mix = snr.shape[-1]
+    perms = tf.one_hot(list(itertools.permutations(range(num_mix))), num_mix)
+    # perms[batch, num_mix, num_mix]
+    snr = tf_expd(snr, 1) * tf_expd(perms, 0)
+    snr = tf_sum(tf_sum(snr, -1), -1)
+
+    batch = tf.shape(snr)[0]
+    perm_id = tf.math.argmax(snr, -1)
+    perm_id_bat = tf.concat([
+      tf_expd(tf.range(batch, dtype=perm_id.dtype), -1), tf_expd(perm_id, -1)], -1)
+
+    max_snr = tf.gather_nd(snr, perm_id_bat) / num_mix
+    max_perm = tf.gather(perms, perm_id)
+    sort_hyp = tf.linalg.matmul(tf.squeeze(hyp, -1), max_perm)
+
+    return max_snr, sort_hyp
+
+  return snr, hyp
+
+class depconv(tf.keras.layers.Layer):
+  def __init__(self, dim, kernel, dilation,
+               skip=True, add_out=True, *args, **kwargs):
+    super(depconv, self).__init__(*args, **kwargs)
+    self.dim = dim
+    self.kernel = kernel
+    self.dilation = dilation
+    self.skip = skip
+    self.add_out = add_out
 
   def build(self, input_shape):
     conv_opt = dict(padding='same')
 
-    # self.conv1 = conv1d(*self.conv_args, **self.conv_kwargs)
-    # self.conv2 = conv1d(*self.conv_args, **self.conv_kwargs)
-    self.conv1 = tf.keras.layers.DepthwiseConv1D(self.conv_args[1], **self.conv_kwargs)
-    self.conv2 = tf.keras.layers.DepthwiseConv1D(self.conv_args[1], **self.conv_kwargs)
+    self.conv = conv1d(self.dim, 1, **conv_opt)
+    self.dconv = conv1d(self.dim, self.kernel,
+      groups=self.dim, dilation_rate=self.dilation, **conv_opt)
 
-    dconv_kwargs = self.conv_kwargs
-    dconv_kwargs["groups"] = 8
-    self.dconv = conv1d(self.conv_args[0], 4, groups=8, **conv_opt)
+    dim = input_shape[-1]
+    if self.add_out:
+      self.out = conv1d(dim, 1, **conv_opt)
 
-    pconv_args = (self.conv_args[0], 1)
-    self.pconv = conv1d(*pconv_args, **conv_opt)
-  
+    self.prelu1 = tf.keras.layers.PReLU(shared_axes=[1, 2], 
+      alpha_initializer=tf.constant_initializer(0.25))
+    self.prelu2 = tf.keras.layers.PReLU(shared_axes=[1, 2], 
+      alpha_initializer=tf.constant_initializer(0.25))
+
+    self.norm1 = gnorm()
+    self.norm2 = gnorm()
+
+    if self.skip:
+      self.skipconv = conv1d(dim, 1, **conv_opt)
+
   def call(self, inputs, training=None):
     x = inputs
 
-    loss = 0.
-    for conv in [self.conv1, self.conv2]:
-      if len(conv.weights) > 0:
-        kernel = conv.weights[0]
-        # kernel = tf.reshape(kernel, [-1, tf.shape(kernel)[-1]])
-        kernel = tf.reshape(kernel, [tf.shape(kernel)[0], -1])
-        kernel_trans = tf.transpose(kernel)
+    x = self.conv(x)
+    x = self.norm1(self.prelu1(x))
+    x = self.dconv(x)
+    x = self.norm2(self.prelu2(x))
 
-        f = tf.signal.fft(tf.cast(kernel_trans, tf.complex64))
-        _loss = tf.reduce_max(tf.nn.softmax(tf.math.abs(f), -1), -1)
-        loss = loss - tf.reduce_mean(_loss)
+    x_res = None
+    if self.add_out:
+      x_res = self.out(x)
 
-    x = tf.nn.relu(self.conv1(x)) + tf.nn.relu(self.conv2(x))
-    x = self.pconv(self.dconv(x))
+    if self.skip:
+      x_skip = self.skipconv(x)
+      return x_res, x_skip
 
-    return x, loss
+    return x_res
 
-class waveunet(tf.keras.layers.Layer):
-  def __init__(self, *args, **kwargs):
-    super(waveunet, self).__init__(*args, **kwargs)
-    self.layer = 4
-    self.dims = [32, 32, 32, 32]
-    self.ksize = 16
-    self.sublayer = 4
+class tcn(tf.keras.layers.Layer):
+  def __init__(self, stack, layer, out_dim, num_spk, skip=True, *args, **kwargs):
+    super(tcn, self).__init__(*args, **kwargs)
+    self.B = 128
+    self.H = 256
+    self.out_dim = out_dim
+    self.num_spk = num_spk
+    self.stack = stack
+    self.layer = layer
+    self.kernel = 3
+    self.skip = skip
+
+  def build(self, input_shape):
+    self.norm = gnorm()
+    self.preconv = conv1d(self.B, 1)
+
+    self.convs = []
+    for s in range(self.stack):
+      for l in range(self.layer):
+        add_out = True
+        if s == (self.stack-1) and l == (self.layer-1) and self.skip:
+          add_out = False
+
+        conv = depconv(
+          self.H, self.kernel, dilation=2**l, skip=self.skip, add_out=add_out)
+        self.convs.append(conv)
+
+    self.prelu = tf.keras.layers.PReLU(shared_axes=[1, 2], 
+      alpha_initializer=tf.constant_initializer(0.25))
+    self.postconv = conv1d(self.out_dim*self.num_spk, 1)
+  
+  def call(self, inputs, training=None):
+    x = inputs
+    x = self.preconv(self.norm(x))
+
+    if self.skip:
+      x_skip = None
+      for idx, conv in enumerate(self.convs):
+        res = x
+        x, x_skip_ = conv(x)
+        x = x + res if idx < (len(self.convs)-1) else None
+        if x_skip is None: x_skip = x_skip_
+        else: x_skip = x_skip + x_skip_
+      x = x_skip
+
+    else:
+      for conv in self.convs:
+        res = x
+        x = conv(x)
+        x = x + res
+
+    x = self.postconv(self.prelu(x))
+    return tf.reshape(x, tf.concat([
+      tf.shape(x)[:2], [self.num_spk, self.out_dim]], 0))
+
+class convtas(tf.keras.layers.Layer):
+  def __init__(self, L=40, *args, **kwargs):
+    super(convtas, self).__init__(*args, **kwargs)
+    self.N = 128
+    self.L = L
+    self.stack = 2
+    self.layer = 7
+    self.kernel = 3
+    self.num_spk = 1
 
   def build(self, input_shape):
     conv_opt = dict(padding='same')
+    stride = self.L // 2
 
-    self.conv_pre = conv1d(self.dims[0], self.ksize, **conv_opt)
-    self.conv_post = conv1d(1, self.ksize, **conv_opt)
+    self.encoder = conv1d(self.N, self.L,
+      use_bias=False, strides=stride, **conv_opt)
 
-    self.down_convs = list(zip(
-      [conv1d_v2(self.dims[idx], self.ksize,
-        strides=2, **conv_opt) for idx in range(self.layer)],
-      [[conv1d(None, self.ksize,
-        strides=1, **conv_opt) for _ in range(self.sublayer)] for idx in range(self.layer)]))
+    self.tcn = tcn(self.stack, self.layer, self.N, self.num_spk)
 
-    self.up_convs = list(zip(
-      [conv1dtrans(self.dims[::-1][idx], self.ksize,
-        strides=2, **conv_opt) for idx in range(self.layer)],
-      [[conv1d(None, self.ksize,
-        strides=1, **conv_opt) for _ in range(self.sublayer)] for idx in range(self.layer)]))
-
-    self.conv_mid = conv1d(self.dims[-1], self.ksize, **conv_opt)
+    self.decoder = conv1dtrans(1, self.L,
+      use_bias=False, strides=stride, **conv_opt)
 
   def call(self, inputs, training=None):
     x, ref = inputs
 
+    if ref is not None:
+      ref = tf_expd(ref, -1)
+
     x = tf_expd(x, -1)
-    #x, conv_pre_loss = self.conv_pre(x)
-    x = self.conv_pre(x); conv_pre_loss = 0.
-    x = tf.nn.relu(x)
+    x = tf.nn.relu(self.encoder(x))
 
-    encs = []; down_conv_losses = []
-    for down_conv, convs in self.down_convs:
-      for conv in convs:
-        x = tf.nn.relu(conv(x)) + x
-      encs.append(x)
+    x_sep = self.tcn(x) 
+    x_sep = tf.math.sigmoid(x_sep)
+    x = tf_expd(x, -2) * x_sep
 
-      x, down_conv_loss = down_conv(x)
-      x = tf.nn.relu(x)
-      down_conv_losses.append(down_conv_loss)
-
-    down_conv_loss = sum(down_conv_losses)
-    x = self.conv_mid(x)
-
-    encs = encs[::-1]
-    for enc, (up_conv, convs) in zip(encs, self.up_convs):
-      x = tf.nn.relu(up_conv(x))
-      x = tf.concat([x, enc], -1)
-      for conv in convs:
-        x = tf.nn.relu(conv(x)) + x
+    x = tf.transpose(x, [0, 2, 1, 3])
+    x = tf.reshape(x, [-1, tf.shape(x)[-2], self.N])
     
-    x = self.conv_post(x)
-    x = tf.math.tanh(x)
-    x = tf.squeeze(x, -1)
+    x = self.decoder(x)
+    x = tf.reshape(x, [-1, self.num_spk, tf.shape(x)[-2]])
+    x = tf.transpose(x, [0, 2, 1])
 
     if ref is not None:
-      samp_loss = tf.math.reduce_mean((x - ref) ** 2)
+      snr, sort_x = si_snr(ref, x)
+      return -tf.math.reduce_mean(snr)
 
-      def stft_loss(x, ref, frame_length, frame_step, fft_length):
-        stft_opt = dict(frame_length=frame_length,
-          frame_step=frame_step, fft_length=fft_length)
-        mag_x = tf.math.abs(stft(x, **stft_opt))
-        mag_ref = tf.math.abs(stft(ref, **stft_opt))
-
-        fro_opt = dict(axis=(-2, -1), ord='fro')
-        sc_loss = tf.norm(mag_x - mag_ref, **fro_opt) / (tf.norm(mag_x, **fro_opt) + 1e-9)
-        sc_loss = tf.reduce_mean(sc_loss)
-
-        mag_loss = tf.math.log(mag_x + 1e-9) - tf.math.log(mag_ref + 1e-9)
-        mag_loss = tf.reduce_mean(tf.math.abs(mag_loss))
-
-        return sc_loss + mag_loss
-
-      spec_loss = stft_loss(x, ref, 25, 5, 1024)
-      spec_loss += stft_loss(x, ref, 50, 10, 2048)
-      spec_loss += stft_loss(x, ref, 10, 2, 512)
-
-      return samp_loss + spec_loss, conv_pre_loss + down_conv_loss
-
-    return x, encs
+    return x
