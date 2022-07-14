@@ -7,8 +7,6 @@ from unisat import *
 
 model = unisat_unet()
 
-import soundfile
-#pcm, _ = soundfile.read("/home/hejung/speech-commands/TEST_SET/no/97f4c236_nohash_0.wav")
 import numpy as np
 pcm = np.zeros(16000)
 _in = np.reshape(pcm, [1, -1])
@@ -71,4 +69,4 @@ for i, layer in enumerate(model.unisat.enc.layers):
   load_norm('{}.final_layer_norm'.format(prefix), layer.out_norm)
 
 ckpt = tf.train.Checkpoint(model)
-ckpt.write("unisat_base.ckpt")
+ckpt.write("unisat_base3.ckpt")

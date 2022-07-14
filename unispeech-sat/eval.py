@@ -1,16 +1,14 @@
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--ckpt", type=str, required=True) 
-parser.add_argument("--eval-dir", type=str, required=True)
+parser.add_argument("--eval-list", type=str, required=False, default="/home/hejung/voicebank-demand/testset.list")
 parser.add_argument("--save-result", action="store_true") 
 args = parser.parse_args()
 
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
-evalname = [e for e in args.eval_dir.split("/") if e][-1]
-eval_list = os.path.join(args.eval_dir, "pcm_ref.list")
-assert os.path.isfile(eval_list)
+assert os.path.isfile(args.eval_list)
 
 import tensorflow as tf
 gpus = tf.config.list_physical_devices('GPU')
@@ -31,22 +29,13 @@ sys.path.insert(0, expdir)
 expname = expdir.split("/")[-1]
 epoch = os.path.basename(args.ckpt).replace(".", "-").split("-")[1]
 
-import model
-if os.path.dirname(model.__file__) != expdir:
-  sys.exit("model is loaded from {}".format(model.__file__))
-
-import json
-exp_args = os.path.join(expdir, "ARGS")
-with open(exp_args, "r") as f:
-  jargs = json.loads(f.readlines()[-1])
-
-  with open(os.path.join(jargs["tfrec"], "ARGS")) as f2:
-    jargs2 = json.loads(f2.readlines()[-1])
-    samp_len = int(jargs2["samp_len"])
+import unisat
+if os.path.dirname(unisat.__file__) != expdir:
+  sys.exit("unisat is loaded from {}".format(unisat.__file__))
 
 import numpy as np
-m = model.waveunet()
-_in = np.zeros((1, samp_len), dtype=np.float32)
+m = unisat.unisat_unet()
+_in = np.zeros((1, 32000), dtype=np.float32)
 _ = m((_in, None), training=False)
 
 ckpt = tf.train.Checkpoint(m)
@@ -54,50 +43,41 @@ ckpt.read(args.ckpt)
 
 import warnings
 import soundfile
+import librosa
 import tqdm
+from pesq import pesq
 
-resname = "{}-{}-{}".format(evalname, expname, epoch)
-evals = [e.strip().split() for e in open(eval_list, "r").readlines()]
+resname = "{}-{}".format(expname, epoch)
+evals = [e.strip().split() for e in open(args.eval_list, "r").readlines()]
 with open("{}.eval".format(resname), "w") as f:
-  pcount = 0; snr_tot = 0
+  pcount = 0; pesq_tot = 0
 
-  for idx, (_pcm, _ref) in enumerate(evals):
-    pcm, _ = soundfile.read(_pcm)
-    ref, _ = soundfile.read(_ref)
+  for idx, (_ref, _pcm) in enumerate(evals):
+    pcm, _ = librosa.load(_pcm, sr=16000)
+    ref, _ = librosa.load(_ref, sr=16000)
     pcm_len = pcm.shape[0]
 
     ref = ref.reshape([1,ref.shape[0],1]).astype(np.float32)
     pcm = np.expand_dims(pcm, 0).astype(np.float32)
 
-    def pad(pcm, mod=16384):
+    def pad(pcm, mod=32000):
       if pcm.shape[-1] % mod != 0:
         pcm = np.concatenate([pcm, np.zeros((1, mod-pcm.shape[-1]%mod))], -1)
         return pcm
-      return pcm
+#      return pcm
 
-    hyp, encs = m((pad(pcm), None), training=False)
+    hyp  = m((pad(pcm), None), training=False)
     hyp = np.squeeze(hyp)[:pcm_len]
+    pcm = np.squeeze(pcm)
+    ref = np.squeeze(ref)
 
-    import librosa
-    import librosa.display
-    for eidx, enc in enumerate(encs):
-      import matplotlib.pyplot as plt
-      fig = plt.figure(figsize=(19.2, 4.8))
-      librosa.display.specshow(np.log(np.squeeze(enc)+1e-9).T, x_axis='time', y_axis='linear')
-      plt.colorbar()
-      plt.savefig("{}_hyp_enc{}_{}.png".format(resname, eidx, idx))
+    _pesq = pesq(16000, ref, hyp)
+    print("{}".format(_pesq))
+    pesq_tot += _pesq
 
-    if idx < 2:
-      import viz
-      if 'ljs' in args.eval_dir: sr = 22050
-      else: sr = 16000
+    if args.save_result:
+      soundfile.write("{}_orig_{}.wav".format(resname, idx), pcm, 16000)
+      soundfile.write("{}_hyp_{}.wav".format(resname, idx), hyp, 16000)
+      soundfile.write("{}_ref_{}.wav".format(resname, idx), ref, 16000)
 
-      soundfile.write("{}_orig_{}.wav".format(resname, idx), np.squeeze(pcm), sr)
-      soundfile.write("{}_hyp_{}.wav".format(resname, idx), hyp, sr)
-      soundfile.write("{}_ref_{}.wav".format(resname, idx), np.squeeze(ref), sr)
-      viz.plot_spec(np.squeeze(pcm), "{}_orig_{}".format(resname, idx), sr)
-      viz.plot_spec(hyp, "{}_hyp_{}".format(resname, idx), sr)
-      viz.plot_spec(np.squeeze(ref), "{}_ref_{}".format(resname, idx), sr)
-    else:
-      break
-
+print("final: {}".format(pesq_tot / len(evals)))

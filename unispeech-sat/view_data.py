@@ -3,7 +3,7 @@ import glob
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
-tfrecs = glob.glob(os.path.join("wsj0_lpf", "train-*.tfrecord"))
+tfrecs = glob.glob(os.path.join("vbank_demand_28", "train-*.tfrecord"))
 data = tf.data.TFRecordDataset(tfrecs)
 
 import soundfile

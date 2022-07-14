@@ -40,9 +40,13 @@ class featencoder(tf.keras.layers.Layer):
   
   def call(self, inputs, training=None):
     x = inputs
+
+    fes = []
     for conv in self.conv_layers:
+      fes.append(x)
       x = conv(x)
-    return x
+
+    return x, fes
 
 class featproj(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
@@ -51,7 +55,8 @@ class featproj(tf.keras.layers.Layer):
   def build(self, input_shape):
     self.norm = lnorm()
     self.proj = tf.keras.layers.Dense(768, use_bias=True)
-    self.dropout = tf.keras.layers.Dropout(0)
+    #self.dropout = tf.keras.layers.Dropout(0)
+    self.dropout = tf.identity
   
   def call(self, inputs, training=None):
     x = inputs
@@ -86,7 +91,8 @@ class attention(tf.keras.layers.Layer):
     self.v_proj = tf.keras.layers.Dense(768, use_bias=True)
     self.q_proj = tf.keras.layers.Dense(768, use_bias=True)
     self.out_proj = tf.keras.layers.Dense(768, use_bias=True)
-    self.dropout = tf.keras.layers.Dropout(0)
+    #self.dropout = tf.keras.layers.Dropout(0)
+    self.dropout = tf.identity
   
   def call(self, inputs, training=None):
     x = inputs
@@ -125,8 +131,10 @@ class feedforward(tf.keras.layers.Layer):
     self.in_dense = tf.keras.layers.Dense(3072, use_bias=True)
     self.out_dense = tf.keras.layers.Dense(input_shape[-1], use_bias=True)
     self.gelu = tf.keras.activations.gelu
-    self.in_dropout = tf.keras.layers.Dropout(0)
-    self.out_dropout = tf.keras.layers.Dropout(0)
+    #self.in_dropout = tf.keras.layers.Dropout(0)
+    #self.out_dropout = tf.keras.layers.Dropout(0)
+    self.in_dropout = tf.identity
+    self.out_dropout = tf.identity
   
   def call(self, inputs, training=None):
     x = inputs
@@ -140,7 +148,8 @@ class enclayer(tf.keras.layers.Layer):
 
   def build(self, input_shape):
     self.atten = attention()
-    self.dropout = tf.keras.layers.Dropout(0)
+    #self.dropout = tf.keras.layers.Dropout(0)
+    self.dropout = tf.identity
     self.norm = lnorm()
     self.feed = feedforward()
     self.out_norm = lnorm()
@@ -162,8 +171,9 @@ class encoder(tf.keras.layers.Layer):
   def build(self, input_shape):
     self.emb = posconvemb()
     self.norm = lnorm()
-    self.dropout = tf.keras.layers.Dropout(0)
-    self.layers = [enclayer() for _ in range(12)]
+    #self.dropout = tf.keras.layers.Dropout(0)
+    self.dropout = tf.identity
+    self.layers = [enclayer() for _ in range(5)]
   
   def call(self, inputs, training=None):
     x = inputs
@@ -188,9 +198,10 @@ class unisat(tf.keras.layers.Layer):
   
   def call(self, inputs, training=None):
     x = inputs
-    x = self.fp(self.fe(x))
+    x, fes = self.fe(x)
+    x = self.fp(x)
     x, encs = self.enc(x)
-    return x, encs
+    return x, fes, encs
 
 class unisat_seq(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
@@ -212,27 +223,30 @@ class unisat_seq(tf.keras.layers.Layer):
 class unisat_unet(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
     super(unisat_unet, self).__init__()
-    self.layer = 9
-    self.dims = [32, 32, 32, 32, 32, 32, 32, 32, 32]
+    self.layer = 7
+    self.dims = [64 for _ in range(self.layer)]
+    self.strides = [5, 2, 2, 2, 2, 2, 2]
     self.ksize = 16
     self.sublayer = 4
 
   def build(self, input_shape):
-    conv_opt = dict(padding='same')
+    conv_opt = dict(padding='same', use_bias=False)
     self.ref_len = input_shape[0][1]
 
     self.unisat = unisat()
 
     self.conv_mid = conv1d(self.dims[-1], self.ksize, **conv_opt)
 
+    self.enc_convs = [tf.keras.layers.Dense(64) for _ in range(self.layer)]
+    self.up_norms = [lnorm() for _ in range(self.layer)]
     self.up_convs = list(zip(
-      [conv1dtrans(self.dims[::-1][idx], 3,
-        strides=2, **conv_opt) for idx in range(self.layer)],
+      [conv1dtrans(self.dims[::-1][idx], 5,
+        strides=self.strides[::-1][idx], **conv_opt) for idx in range(self.layer)],
       [[conv1d(None, self.ksize,
         strides=1, **conv_opt) for _ in range(self.sublayer)] for idx in range(self.layer)]))
-    self.up_int_convs = [
-      conv1dtrans(self.dims[::-1][idx], 3,
-        strides=2, **conv_opt) for idx in range(self.layer)]
+    #self.up_int_convs = [
+    #  conv1dtrans(self.dims[::-1][idx], 5,
+    #    strides=self.strides[::-1][idx], **conv_opt) for idx in range(self.layer)]
 
     self.conv_post = conv1d(1, self.ksize, **conv_opt)
   
@@ -240,34 +254,46 @@ class unisat_unet(tf.keras.layers.Layer):
     x, ref = inputs
 
     x = tf_expd(x, -1)
-    x, encs = self.unisat(x)
-    x = tf.nn.relu(x)
+    x, fes, encs = self.unisat(x)
+    x = tf.keras.activations.gelu(x)
     #x = tf.stop_gradient(x)
 
     x = self.conv_mid(x)
    
-    idx = 0; encs = encs[::-1]
-    for _enc, (up_conv, convs) in zip(encs, self.up_convs):
-      x = tf.nn.relu(up_conv(x))
+    idx = 0; encs = encs[::-1]; fes = fes[::-1]
+    #for _enc, (up_conv, convs) in zip(encs, self.up_convs):
+    for _enc, (up_conv, convs) in zip(fes, self.up_convs):
+      x = tf.keras.activations.gelu(up_conv(x))
       
-      enc = _enc
-      for _idx in range(idx+1):
-        enc = tf.nn.relu(self.up_int_convs[_idx](enc))
+      enc = self.enc_convs[idx](_enc)
+      #for _idx in range(idx+1):
+      #  enc = tf.keras.activations.gelu(self.up_int_convs[_idx](enc))
+      #enc = self.up_norms[idx](enc)
 
       #x = tf.concat([x, enc], -1)
-      x = x + enc
+      #x = x + enc[:,:tf.shape(x)[1],:]
+      pad = tf.shape(enc)[1] - tf.shape(x)[1]
+      lpad = pad // 2
+      rpad = pad - lpad
+      x = tf.concat([
+        tf.zeros_like(x)[:,:lpad,:],
+        x,
+        tf.zeros_like(x)[:,:rpad,:]], 1)
+      x = tf.concat([x, enc], -1)
+
+      #x = tf.keras.activations.gelu(up_conv(x))
       for conv in convs:
-        x = tf.nn.relu(conv(x)) + x
+        x = tf.keras.activations.gelu(conv(x)) + x
       idx += 1
     
     x = self.conv_post(x)
     x = tf.math.tanh(x)
     x = tf.squeeze(x, -1)
 
-    pad = tf.shape(x)[1] - self.ref_len
-    lpad = pad // 2
-    rpad = pad - lpad
-    x = x[:, lpad:-rpad]
+    #pad = tf.shape(x)[1] - self.ref_len
+    #lpad = pad // 2
+    #rpad = pad - lpad
+    #x = x[:, lpad:-rpad]
 
     if ref is not None:
       samp_loss = tf.math.reduce_mean((x - ref) ** 2)
