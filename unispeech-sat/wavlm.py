@@ -187,9 +187,9 @@ class encoder(tf.keras.layers.Layer):
       x = layer(x)
     return x, encs
 
-class unisat(tf.keras.layers.Layer):
+class wavlm(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
-    super(unisat, self).__init__()
+    super(wavlm, self).__init__()
 
   def build(self, input_shape):
     self.fe = featencoder()
@@ -203,26 +203,26 @@ class unisat(tf.keras.layers.Layer):
     x, encs = self.enc(x)
     return x, fes, encs
 
-class unisat_seq(tf.keras.layers.Layer):
+class wavlm_seq(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
-    super(unisat_seq, self).__init__()
+    super(wavlm_seq, self).__init__()
 
   def build(self, input_shape):
-    self.unisat = unisat()
+    self.wavlm = wavlm()
     self.projector = tf.keras.layers.Dense(256, use_bias=True)
     self.classifier = tf.keras.layers.Dense(12, use_bias=True)
   
   def call(self, inputs, training=None):
     x = inputs
-    x, fes, encs = self.unisat(x)
+    x, fes, encs = self.wavlm(x)
     x = self.projector(x)
     x = tf.math.reduce_mean(x, 1)
     x = self.classifier(x)
     return x
 
-class unisat_unet(tf.keras.layers.Layer):
+class wavlm_unet(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
-    super(unisat_unet, self).__init__()
+    super(wavlm_unet, self).__init__()
     self.layer = 7
     self.dims = [64 for _ in range(self.layer)]
     self.strides = [5, 2, 2, 2, 2, 2, 2]
@@ -233,7 +233,7 @@ class unisat_unet(tf.keras.layers.Layer):
     conv_opt = dict(padding='same', use_bias=False)
     self.ref_len = input_shape[0][1]
 
-    self.unisat = unisat()
+    self.wavlm = wavlm()
 
     self.conv_mid = conv1d(self.dims[-1], self.ksize, **conv_opt)
 
@@ -254,7 +254,7 @@ class unisat_unet(tf.keras.layers.Layer):
     x, ref = inputs
 
     x = tf_expd(x, -1)
-    x, fes, encs = self.unisat(x)
+    x, fes, encs = self.wavlm(x)
     x = tf.keras.activations.gelu(x)
     #x = tf.stop_gradient(x)
 
