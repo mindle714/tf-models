@@ -46,11 +46,12 @@ import soundfile
 import librosa
 import tqdm
 from pesq import pesq
+from pystoi import stoi
 
 resname = "{}-{}".format(expname, epoch)
 evals = [e.strip().split() for e in open(args.eval_list, "r").readlines()]
 with open("{}.eval".format(resname), "w") as f:
-  pcount = 0; pesq_tot = 0
+  pcount = 0; pesq_tot = 0; stoi_tot = 0
 
   for idx, (_ref, _pcm) in enumerate(evals):
     pcm, _ = librosa.load(_pcm, sr=16000)
@@ -72,12 +73,16 @@ with open("{}.eval".format(resname), "w") as f:
     ref = np.squeeze(ref)
 
     _pesq = pesq(16000, ref, hyp)
-    print("{}".format(_pesq))
+    _stoi = stoi(ref, hyp, 16000, extended=False)
+    #print("{}".format(_pesq))
+    f.write("{} {}\n".format(_pesq, _stoi))
     pesq_tot += _pesq
+    stoi_tot += _stoi
 
     if args.save_result:
       soundfile.write("{}_orig_{}.wav".format(resname, idx), pcm, 16000)
       soundfile.write("{}_hyp_{}.wav".format(resname, idx), hyp, 16000)
       soundfile.write("{}_ref_{}.wav".format(resname, idx), ref, 16000)
 
-print("final: {}".format(pesq_tot / len(evals)))
+  #print("final: {}".format(pesq_tot / len(evals)))
+  f.write("final: {} {}\n".format(pesq_tot / len(evals), stoi_tot / len(evals)))
