@@ -210,7 +210,8 @@ class cnorm(tf.keras.layers.Layer):
     return self.gamma * (x-m) / tf.math.sqrt(v + self.eps) + self.beta
 
 class lnorm(gnorm):
-  def __init__(self, *args, **kwargs):
+  def __init__(self, affine=True, *args, **kwargs):
+    self.affine = affine
     super(lnorm, self).__init__(*args, **kwargs)
 
   def build(self, input_shape):
@@ -218,10 +219,11 @@ class lnorm(gnorm):
     else: dim = input_shape[-1]
 
     self.eps = 1e-5
-    self.gamma = self.add_weight(shape=(dim),
-      initializer="ones", name="gamma")
-    self.beta = self.add_weight(shape=(dim),
-      initializer="zeros", name="beta")
+    if self.affine:
+      self.gamma = self.add_weight(shape=(dim),
+        initializer="ones", name="gamma")
+      self.beta = self.add_weight(shape=(dim),
+        initializer="zeros", name="beta")
 
   def call(self, inputs, training=None):
     if isinstance(inputs, tuple):
@@ -232,6 +234,9 @@ class lnorm(gnorm):
       x = inputs
       m, v = tf.nn.moments(x, [-1], keepdims=True)
 
-    gamma = tf.reshape(self.gamma, [1, 1, -1])
-    beta = tf.reshape(self.beta, [1, 1, -1])
-    return self.gamma * (x-m) / tf.math.sqrt(v + self.eps) + self.beta
+    if self.affine:
+      gamma = tf.reshape(self.gamma, [1, 1, -1])
+      beta = tf.reshape(self.beta, [1, 1, -1])
+      return self.gamma * (x-m) / tf.math.sqrt(v + self.eps) + self.beta
+
+    return (x-m) / tf.math.sqrt(v + self.eps)
