@@ -42,6 +42,7 @@ for i, conv in enumerate(model.unisat.fe.conv_layers):
   if i == 0:
     load_norm('{}.{}.layer_norm'.format(prefix, i), conv.norm)
 
+'''
 prefix = 'unispeech_sat.feature_projection'
 load_norm('{}.layer_norm'.format(prefix), model.unisat.fp.norm)
 load_affine('{}.projection'.format(prefix), model.unisat.fp.proj)
@@ -67,6 +68,7 @@ for i, layer in enumerate(model.unisat.enc.layers):
   
   load_norm('{}.layer_norm'.format(prefix), layer.norm)
   load_norm('{}.final_layer_norm'.format(prefix), layer.out_norm)
+'''
 
 ckpt = tf.train.Checkpoint(model)
-ckpt.write("unisat_base3.ckpt")
+ckpt.write("unisat_base_v5.ckpt")
