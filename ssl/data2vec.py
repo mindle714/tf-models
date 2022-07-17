@@ -219,14 +219,15 @@ class data2vec(tf.keras.layers.Layer):
   def build(self, input_shape):
     self.fe = featencoder()
     self.fp = featproj()
-    self.enc = encoder()
+    #self.enc = encoder()
   
   def call(self, inputs, training=None):
     x = inputs
     x, fes = self.fe(x)
     x = self.fp(x)
-    x, encs = self.enc(x)
-    return x, fes, encs
+    #x, encs = self.enc(x)
+    #return x, fes, encs
+    return x, fes, fes
 
 class data2vec_seq(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):

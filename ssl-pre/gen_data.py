@@ -78,7 +78,7 @@ for bidx in tqdm.tqdm(range(len(train_list)//num_process+1)):
   pcms = [librosa.load(e, sr=args.samp_rate)[0] for e in blist]
 
   with multiprocessing.Pool(num_process) as pool:
-    exs = pool.starmap(get_feats, pcms)
+    exs = pool.starmap(get_feats, zip(pcms,))
 
   for ex in exs:
     for _ex in ex:

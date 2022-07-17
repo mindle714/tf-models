@@ -29,12 +29,12 @@ sys.path.insert(0, expdir)
 expname = expdir.split("/")[-1]
 epoch = os.path.basename(args.ckpt).replace(".", "-").split("-")[1]
 
-import unisat
-if os.path.dirname(unisat.__file__) != expdir:
-  sys.exit("unisat is loaded from {}".format(unisat.__file__))
+import data2vec
+if os.path.dirname(data2vec.__file__) != expdir:
+  sys.exit("data2vec is loaded from {}".format(data2vec.__file__))
 
 import numpy as np
-m = unisat.unisat_unet()
+m = data2vec.data2vec_unet()
 _in = np.zeros((1, 32000), dtype=np.float32)
 _ = m((_in, None), training=False)
 

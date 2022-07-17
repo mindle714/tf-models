@@ -1,0 +1,8 @@
+#!/usr/bin/bash
+
+#epoch=100000; for exp in unisat_base_v4/ unisat_pre_v4/ \
+#  unisat_pre_v4_sg/ wavlm_base/ wavlm_pre/; do
+epoch=100000; for exp in data2vec_base data2vec_pre_sg data2vec_pre; do
+  CUDA_VISIBLE_DEVICES=-1 python3 eval.py \
+  --ckpt exps/$exp/model-${epoch}.ckpt; 
+done
