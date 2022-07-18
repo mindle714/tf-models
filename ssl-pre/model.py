@@ -68,15 +68,12 @@ class posconvemb(tf.keras.layers.Layer):
 
   def build(self, input_shape):
     self.conv = tf.keras.layers.Conv1D(768, 
-      kernel_size=128, strides=1, groups=16)
+      kernel_size=128, strides=1, groups=16, padding='same')
     self.gelu = tf.keras.activations.gelu
   
   def call(self, inputs, training=None):
     x = inputs
-    shape = [tf.shape(x)[0], 64, tf.shape(x)[-1]]
-    pad = tf.zeros(shape)
-    x_pad = tf.concat([pad, x, pad], 1)
-    return self.gelu(self.conv(x_pad)[:,:-1,:])
+    return self.gelu(self.conv(x))
 
 class attention(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
@@ -187,42 +184,38 @@ class encoder(tf.keras.layers.Layer):
       x = layer(x)
     return x, encs
 
-class hubert(tf.keras.layers.Layer):
+class wav2vec2(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
-    super(hubert, self).__init__()
+    super(wav2vec2, self).__init__()
 
   def build(self, input_shape):
     self.fe = featencoder()
-    self.fp = featproj()
-    self.enc = encoder()
   
   def call(self, inputs, training=None):
     x = inputs
     x, fes = self.fe(x)
-    x = self.fp(x)
-    x, encs = self.enc(x)
-    return x, fes, encs
+    return x, fes
 
-class hubert_seq(tf.keras.layers.Layer):
+class wav2vec2_seq(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
-    super(hubert_seq, self).__init__()
+    super(wav2vec2_seq, self).__init__()
 
   def build(self, input_shape):
-    self.hubert = hubert()
+    self.wav2vec2 = wav2vec2()
     self.projector = tf.keras.layers.Dense(256, use_bias=True)
     self.classifier = tf.keras.layers.Dense(12, use_bias=True)
   
   def call(self, inputs, training=None):
     x = inputs
-    x, fes, encs = self.hubert(x)
+    x, fes, encs = self.wav2vec2(x)
     x = self.projector(x)
     x = tf.math.reduce_mean(x, 1)
     x = self.classifier(x)
     return x
 
-class hubert_unet(tf.keras.layers.Layer):
+class wav2vec2_unet(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
-    super(hubert_unet, self).__init__()
+    super(wav2vec2_unet, self).__init__()
     self.layer = 7
     self.dims = [64 for _ in range(self.layer)]
     self.strides = [5, 2, 2, 2, 2, 2, 2]
@@ -233,7 +226,7 @@ class hubert_unet(tf.keras.layers.Layer):
     conv_opt = dict(padding='same', use_bias=False)
     self.ref_len = input_shape[0][1]
 
-    self.hubert = hubert()
+    self.wav2vec2 = wav2vec2()
 
     self.conv_mid = conv1d(self.dims[-1], self.ksize, **conv_opt)
 
@@ -244,44 +237,26 @@ class hubert_unet(tf.keras.layers.Layer):
         strides=self.strides[::-1][idx], **conv_opt) for idx in range(self.layer)],
       [[conv1d(None, self.ksize,
         strides=1, **conv_opt) for _ in range(self.sublayer)] for idx in range(self.layer)]))
-    #self.up_int_convs = [
-    #  conv1dtrans(self.dims[::-1][idx], 5,
-    #    strides=self.strides[::-1][idx], **conv_opt) for idx in range(self.layer)]
 
     self.conv_post = conv1d(1, self.ksize, **conv_opt)
   
   def call(self, inputs, training=None):
-    x, ref = inputs
+    x = inputs
 
     x = tf_expd(x, -1)
-    x, fes, encs = self.hubert(x)
+    x, fes = self.wav2vec2(x)
     x = tf.keras.activations.gelu(x)
     x = tf.stop_gradient(x)
 
     x = self.conv_mid(x)
    
     idx = 0; encs = encs[::-1]; fes = fes[::-1]
-    #for _enc, (up_conv, convs) in zip(encs, self.up_convs):
     for _enc, (up_conv, convs) in zip(fes, self.up_convs):
       x = tf.keras.activations.gelu(up_conv(x))
       
       enc = self.enc_convs[idx](_enc)
-      #for _idx in range(idx+1):
-      #  enc = tf.keras.activations.gelu(self.up_int_convs[_idx](enc))
-      #enc = self.up_norms[idx](enc)
-
-      #x = tf.concat([x, enc], -1)
-      #x = x + enc[:,:tf.shape(x)[1],:]
-      pad = tf.shape(enc)[1] - tf.shape(x)[1]
-      lpad = pad // 2
-      rpad = pad - lpad
-      x = tf.concat([
-        tf.zeros_like(x)[:,:lpad,:],
-        x,
-        tf.zeros_like(x)[:,:rpad,:]], 1)
       x = tf.concat([x, enc], -1)
 
-      #x = tf.keras.activations.gelu(up_conv(x))
       for conv in convs:
         x = tf.keras.activations.gelu(conv(x)) + x
       idx += 1
@@ -289,11 +264,6 @@ class hubert_unet(tf.keras.layers.Layer):
     x = self.conv_post(x)
     x = tf.math.tanh(x)
     x = tf.squeeze(x, -1)
-
-    #pad = tf.shape(x)[1] - self.ref_len
-    #lpad = pad // 2
-    #rpad = pad - lpad
-    #x = x[:, lpad:-rpad]
 
     if ref is not None:
       samp_loss = tf.math.reduce_mean((x - ref) ** 2)
