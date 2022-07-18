@@ -256,7 +256,7 @@ class unisat_unet(tf.keras.layers.Layer):
     x = tf_expd(x, -1)
     x, fes = self.unisat(x)
     x = tf.keras.activations.gelu(x)
-    #x = tf.stop_gradient(x)
+    x = tf.stop_gradient(x)
 
     x = self.conv_mid(x)
    

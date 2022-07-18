@@ -42,6 +42,7 @@ for i, conv in enumerate(model.hubert.fe.conv_layers):
   if i == 0:
     load_norm('{}.{}.layer_norm'.format(prefix, i), conv.norm)
 
+'''
 prefix = 'feature_projection'
 load_norm('{}.layer_norm'.format(prefix), model.hubert.fp.norm)
 load_affine('{}.projection'.format(prefix), model.hubert.fp.proj)
@@ -67,6 +68,7 @@ for i, layer in enumerate(model.hubert.enc.layers):
   
   load_norm('{}.layer_norm'.format(prefix), layer.norm)
   load_norm('{}.final_layer_norm'.format(prefix), layer.out_norm)
+'''
 
 ckpt = tf.train.Checkpoint(model)
-ckpt.write("hubert_base.ckpt")
+ckpt.write("hubert_base_v2.ckpt")

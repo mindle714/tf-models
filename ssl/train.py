@@ -86,8 +86,8 @@ if args.val_tfrec is not None:
 lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
-import unisat
-m = unisat.unisat_unet()
+import wav2vec2
+m = wav2vec2.wav2vec2_unet()
 
 specs = [val.__spec__ for name, val in sys.modules.items() \
   if isinstance(val, types.ModuleType) and not ('_main_' in name)]

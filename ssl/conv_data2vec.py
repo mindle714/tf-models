@@ -41,6 +41,7 @@ for i, layer in enumerate(model.data2vec.fe.conv_layers):
   load_conv('{}.{}.conv'.format(prefix, i), layer.conv)
   load_norm('{}.{}.layer_norm'.format(prefix, i), layer.norm)
 
+'''
 prefix = 'data2vec_audio.feature_projection'
 load_norm('{}.layer_norm'.format(prefix), model.data2vec.fp.norm)
 load_affine('{}.projection'.format(prefix), model.data2vec.fp.proj)
@@ -62,6 +63,7 @@ for i, layer in enumerate(model.data2vec.enc.layers):
   
   load_norm('{}.layer_norm'.format(prefix), layer.norm)
   load_norm('{}.final_layer_norm'.format(prefix), layer.out_norm)
+'''
 
 ckpt = tf.train.Checkpoint(model)
-ckpt.write("data2vec_base.ckpt")
+ckpt.write("data2vec_base_v2.ckpt")

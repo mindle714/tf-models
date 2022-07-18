@@ -42,6 +42,7 @@ for i, conv in enumerate(model.wav2vec2.fe.conv_layers):
   if i == 0:
     load_norm('{}.{}.layer_norm'.format(prefix, i), conv.norm)
 
+'''
 prefix = 'wav2vec2.feature_projection'
 load_norm('{}.layer_norm'.format(prefix), model.wav2vec2.fp.norm)
 load_affine('{}.projection'.format(prefix), model.wav2vec2.fp.proj)
@@ -67,6 +68,7 @@ for i, layer in enumerate(model.wav2vec2.enc.layers):
   
   load_norm('{}.layer_norm'.format(prefix), layer.norm)
   load_norm('{}.final_layer_norm'.format(prefix), layer.out_norm)
+'''
 
 ckpt = tf.train.Checkpoint(model)
-ckpt.write("wav2vec2_base.ckpt")
+ckpt.write("wav2vec2_base_v2.ckpt")

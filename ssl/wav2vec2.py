@@ -193,15 +193,15 @@ class wav2vec2(tf.keras.layers.Layer):
 
   def build(self, input_shape):
     self.fe = featencoder()
-    self.fp = featproj()
-    self.enc = encoder()
+    #self.fp = featproj()
+    #self.enc = encoder()
   
   def call(self, inputs, training=None):
     x = inputs
     x, fes = self.fe(x)
-    x = self.fp(x)
-    x, encs = self.enc(x)
-    return x, fes, encs
+    #x = self.fp(x)
+    #x, encs = self.enc(x)
+    return x, fes#, encs
 
 class wav2vec2_seq(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
@@ -254,13 +254,13 @@ class wav2vec2_unet(tf.keras.layers.Layer):
     x, ref = inputs
 
     x = tf_expd(x, -1)
-    x, fes, encs = self.wav2vec2(x)
+    x, fes = self.wav2vec2(x)
     x = tf.keras.activations.gelu(x)
-    x = tf.stop_gradient(x)
+    #x = tf.stop_gradient(x)
 
     x = self.conv_mid(x)
    
-    idx = 0; encs = encs[::-1]; fes = fes[::-1]
+    idx = 0; fes = fes[::-1]
     #for _enc, (up_conv, convs) in zip(encs, self.up_convs):
     for _enc, (up_conv, convs) in zip(fes, self.up_convs):
       x = tf.keras.activations.gelu(up_conv(x))

@@ -224,10 +224,10 @@ class data2vec(tf.keras.layers.Layer):
   def call(self, inputs, training=None):
     x = inputs
     x, fes = self.fe(x)
-    x = self.fp(x)
+    #x = self.fp(x)
     #x, encs = self.enc(x)
     #return x, fes, encs
-    return x, fes, fes
+    return x, fes#, fes
 
 class data2vec_seq(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
@@ -280,13 +280,13 @@ class data2vec_unet(tf.keras.layers.Layer):
     x, ref = inputs
 
     x = tf_expd(x, -1)
-    x, fes, encs = self.data2vec(x)
+    x, fes = self.data2vec(x)
     x = tf.keras.activations.gelu(x)
     #x = tf.stop_gradient(x)
 
     x = self.conv_mid(x)
    
-    idx = 0; encs = encs[::-1]; fes = fes[::-1]
+    idx = 0; fes = fes[::-1]
     #for _enc, (up_conv, convs) in zip(encs, self.up_convs):
     for _enc, (up_conv, convs) in zip(fes, self.up_convs):
       x = tf.keras.activations.gelu(up_conv(x))
