@@ -9,7 +9,9 @@ class gnormconv1d(tf.keras.layers.Layer):
     super(gnormconv1d, self).__init__()
 
   def build(self, input_shape):
-    self.conv = tf.keras.layers.Conv1D(512, kernel_size=10, strides=5, use_bias=False)
+    conv_opt = dict(padding='same', use_bias=False)
+
+    self.conv = tf.keras.layers.Conv1D(512, kernel_size=10, strides=5, **conv_opt)
     self.norm = gnorm(512)
     self.gelu = tf.keras.activations.gelu
   
@@ -23,199 +25,90 @@ class nonormconv1d(tf.keras.layers.Layer):
     super(nonormconv1d, self).__init__()
 
   def build(self, input_shape):
-    self.conv = tf.keras.layers.Conv1D(512, kernel_size=self.ksize, strides=2, use_bias=False)
+    conv_opt = dict(padding='same', use_bias=False)
+
+    self.conv = tf.keras.layers.Conv1D(512, kernel_size=self.ksize, strides=2, **conv_opt)
     self.gelu = tf.keras.activations.gelu
   
   def call(self, inputs, training=None):
     x = inputs
     return self.gelu(self.conv(x))
 
-class featencoder(tf.keras.layers.Layer):
-  def __init__(self, *args, **kwargs):
-    super(featencoder, self).__init__()
+class pd_mask(tf.keras.layers.Layer):
+  def __init__(self, period, *args, **kwargs):
+    self.period = period
+    super(pd_mask, self).__init__()
+  
+  def build(self, input_shape):
+    self.dim = input_shape[-1]
+
+  def call(self, inputs, training=None):
+    x = inputs
+    x_len = tf.shape(x)[1]
+
+    mask_idx = tf.random.uniform([], maxval=self.period, dtype=tf.int32)
+    _filter = tf.linalg.LinearOperatorBlockDiag([
+      tf.linalg.LinearOperatorFullMatrix(tf.eye(self.dim)) if idx != mask_idx \
+      else tf.linalg.LinearOperatorFullMatrix(tf.zeros([self.dim, self.dim])) \
+      for idx in range(self.period)
+    ]).to_dense()
+    _filter = tf.reshape(_filter, [self.period, self.dim, -1])
+
+    mask_x = tf.nn.conv1d(x, _filter, self.period, 'SAME')
+    shape = tf.shape(mask_x)
+    x = tf.reshape(mask_x, [shape[0], shape[1]*self.period, shape[2]//self.period])
+
+    return x[:,:x_len,:]
+
+class mpd_mask(tf.keras.layers.Layer):
+  def __init__(self, periods=[2,3,5], *args, **kwargs):
+    self.periods = periods
+    super(mpd_mask, self).__init__()
+
+  def build(self, input_shape):
+    self.pds = [pd_mask(p) for p in self.periods]
+
+  def call(self, inputs, training=None):
+    x = inputs
+
+    pd_idx = tf.random.uniform([], maxval=len(self.periods), dtype=tf.int32)
+
+    ret_x = x
+    for idx in range(len(self.pds)):
+      if idx == pd_idx:
+        ret_x = self.pds[idx](x)
+
+    return ret_x
+
+class wav2vec2(tf.keras.layers.Layer):
+  def __init__(self, pretrain, *args, **kwargs):
+    super(wav2vec2, self).__init__()
+    self.pretrain = pretrain
 
   def build(self, input_shape):
     ksizes = [3, 3, 3, 3, 2, 2]
     self.conv_layers = [gnormconv1d()] + [nonormconv1d(ksizes[i]) for i in range(6)]
+
+    if self.pretrain:
+      self.masks = [mpd_mask() for _ in range(len(self.conv_layers))]
   
   def call(self, inputs, training=None):
     x = inputs
 
     fes = []
-    for conv in self.conv_layers:
+    for mask, conv in zip(self.masks, self.conv_layers):
+      if self.pretrain:
+        x = mask(x)
+
       fes.append(x)
       x = conv(x)
 
     return x, fes
 
-class featproj(tf.keras.layers.Layer):
-  def __init__(self, *args, **kwargs):
-    super(featproj, self).__init__()
-
-  def build(self, input_shape):
-    self.norm = lnorm()
-    self.proj = tf.keras.layers.Dense(768, use_bias=True)
-    #self.dropout = tf.keras.layers.Dropout(0)
-    self.dropout = tf.identity
-  
-  def call(self, inputs, training=None):
-    x = inputs
-    return self.dropout(self.proj(self.norm(x)))
-
-class posconvemb(tf.keras.layers.Layer):
-  def __init__(self, *args, **kwargs):
-    super(posconvemb, self).__init__()
-
-  def build(self, input_shape):
-    self.conv = tf.keras.layers.Conv1D(768, 
-      kernel_size=128, strides=1, groups=16, padding='same')
-    self.gelu = tf.keras.activations.gelu
-  
-  def call(self, inputs, training=None):
-    x = inputs
-    return self.gelu(self.conv(x))
-
-class attention(tf.keras.layers.Layer):
-  def __init__(self, *args, **kwargs):
-    self.num_heads = 12 
-    super(attention, self).__init__()
-
-  def build(self, input_shape):
-    dim = input_shape[-1]
-    self.head_dim = dim // self.num_heads
-    self.scaling = self.head_dim ** -0.5
-    self.k_proj = tf.keras.layers.Dense(768, use_bias=True)
-    self.v_proj = tf.keras.layers.Dense(768, use_bias=True)
-    self.q_proj = tf.keras.layers.Dense(768, use_bias=True)
-    self.out_proj = tf.keras.layers.Dense(768, use_bias=True)
-    #self.dropout = tf.keras.layers.Dropout(0)
-    self.dropout = tf.identity
-  
-  def call(self, inputs, training=None):
-    x = inputs
-
-    def reshape(e):
-      e = tf.reshape(e,
-        tf.concat([tf.shape(x)[:2], [self.num_heads, self.head_dim]], 0))
-      e = tf.transpose(e, [0, 2, 1, 3])
-      e = tf.reshape(e,
-        tf.concat([[-1], tf.shape(e)[-2:]], 0))
-      return e
-
-    q = reshape(self.q_proj(x) * self.scaling)
-    k = reshape(self.k_proj(x))
-    v = reshape(self.v_proj(x))
-
-    attn_weights = tf.linalg.matmul(q, k, transpose_b=True)
-    attn_weights = tf.nn.softmax(attn_weights, -1)
-    attn_probs = self.dropout(attn_weights)
-    attn_output = tf.linalg.matmul(attn_probs, v)
-
-    attn_output = tf.reshape(attn_output,
-      tf.concat([[-1, self.num_heads], tf.shape(attn_output)[-2:]], 0))
-    attn_output = tf.transpose(attn_output, [0, 2, 1, 3])
-    attn_output = tf.reshape(attn_output,
-      tf.concat([tf.shape(attn_output)[:-2], [-1]], 0))
-
-    attn_output = self.out_proj(attn_output)
-    return attn_output
-
-class feedforward(tf.keras.layers.Layer):
-  def __init__(self, *args, **kwargs):
-    super(feedforward, self).__init__()
-
-  def build(self, input_shape):
-    self.in_dense = tf.keras.layers.Dense(3072, use_bias=True)
-    self.out_dense = tf.keras.layers.Dense(input_shape[-1], use_bias=True)
-    self.gelu = tf.keras.activations.gelu
-    #self.in_dropout = tf.keras.layers.Dropout(0)
-    #self.out_dropout = tf.keras.layers.Dropout(0)
-    self.in_dropout = tf.identity
-    self.out_dropout = tf.identity
-  
-  def call(self, inputs, training=None):
-    x = inputs
-    x = self.in_dropout(self.gelu(self.in_dense(x)))
-    x = self.out_dropout(self.out_dense(x))
-    return x
-
-class enclayer(tf.keras.layers.Layer):
-  def __init__(self, *args, **kwargs):
-    super(enclayer, self).__init__()
-
-  def build(self, input_shape):
-    self.atten = attention()
-    #self.dropout = tf.keras.layers.Dropout(0)
-    self.dropout = tf.identity
-    self.norm = lnorm()
-    self.feed = feedforward()
-    self.out_norm = lnorm()
-
-  def call(self, inputs, training=None):
-    x = inputs
-    x_attn = self.atten(x)
-    x_attn = self.dropout(x_attn)
-    x = x + x_attn
-    x = self.norm(x)
-    x = x + self.feed(x)
-    x = self.out_norm(x)
-    return x
-
-class encoder(tf.keras.layers.Layer):
-  def __init__(self, *args, **kwargs):
-    super(encoder, self).__init__()
-
-  def build(self, input_shape):
-    self.emb = posconvemb()
-    self.norm = lnorm()
-    #self.dropout = tf.keras.layers.Dropout(0)
-    self.dropout = tf.identity
-    self.layers = [enclayer() for _ in range(12)]
-  
-  def call(self, inputs, training=None):
-    x = inputs
-    x = x + self.emb(x)
-    x = self.norm(x)
-    x = self.dropout(x)
-
-    encs = []
-    for layer in self.layers:
-      encs.append(x)
-      x = layer(x)
-    return x, encs
-
-class wav2vec2(tf.keras.layers.Layer):
-  def __init__(self, *args, **kwargs):
-    super(wav2vec2, self).__init__()
-
-  def build(self, input_shape):
-    self.fe = featencoder()
-  
-  def call(self, inputs, training=None):
-    x = inputs
-    x, fes = self.fe(x)
-    return x, fes
-
-class wav2vec2_seq(tf.keras.layers.Layer):
-  def __init__(self, *args, **kwargs):
-    super(wav2vec2_seq, self).__init__()
-
-  def build(self, input_shape):
-    self.wav2vec2 = wav2vec2()
-    self.projector = tf.keras.layers.Dense(256, use_bias=True)
-    self.classifier = tf.keras.layers.Dense(12, use_bias=True)
-  
-  def call(self, inputs, training=None):
-    x = inputs
-    x, fes, encs = self.wav2vec2(x)
-    x = self.projector(x)
-    x = tf.math.reduce_mean(x, 1)
-    x = self.classifier(x)
-    return x
-
 class wav2vec2_unet(tf.keras.layers.Layer):
-  def __init__(self, *args, **kwargs):
+  def __init__(self, pretrain=False, *args, **kwargs):
     super(wav2vec2_unet, self).__init__()
+    self.pretrain = pretrain
     self.layer = 7
     self.dims = [64 for _ in range(self.layer)]
     self.strides = [5, 2, 2, 2, 2, 2, 2]
@@ -224,9 +117,8 @@ class wav2vec2_unet(tf.keras.layers.Layer):
 
   def build(self, input_shape):
     conv_opt = dict(padding='same', use_bias=False)
-    self.ref_len = input_shape[0][1]
 
-    self.wav2vec2 = wav2vec2()
+    self.wav2vec2 = wav2vec2(self.pretrain)
 
     self.conv_mid = conv1d(self.dims[-1], self.ksize, **conv_opt)
 
@@ -241,16 +133,22 @@ class wav2vec2_unet(tf.keras.layers.Layer):
     self.conv_post = conv1d(1, self.ksize, **conv_opt)
   
   def call(self, inputs, training=None):
-    x = inputs
+    if isinstance(inputs, tuple):
+      x, ref = inputs
+    elif self.pretrain:
+      x = inputs
+      ref = x
+    else:
+      x = inputs
+      ref = None
 
     x = tf_expd(x, -1)
     x, fes = self.wav2vec2(x)
     x = tf.keras.activations.gelu(x)
-    x = tf.stop_gradient(x)
 
     x = self.conv_mid(x)
    
-    idx = 0; encs = encs[::-1]; fes = fes[::-1]
+    idx = 0; fes = fes[::-1]
     for _enc, (up_conv, convs) in zip(fes, self.up_convs):
       x = tf.keras.activations.gelu(up_conv(x))
       

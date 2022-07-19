@@ -86,8 +86,8 @@ if args.val_tfrec is not None:
 lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
-import data2vec
-m = data2vec.data2vec_unet()
+import model
+m = model.wav2vec2_unet(pretrain=True)
 
 specs = [val.__spec__ for name, val in sys.modules.items() \
   if isinstance(val, types.ModuleType) and not ('_main_' in name)]
@@ -104,9 +104,9 @@ log_writer = tf.summary.create_file_writer(logdir)
 log_writer.set_as_default()
 
 @tf.function
-def run_step(step, pcm, ref, training=True):
+def run_step(step, pcm, training=True):
   with tf.GradientTape() as tape, log_writer.as_default():
-    loss = m((pcm, ref), training=training)
+    loss = m(pcm, training=training)
     loss = tf.math.reduce_mean(loss)
     tf.summary.scalar("loss", loss, step=step)
     total_loss = loss
@@ -166,7 +166,7 @@ for idx, data in enumerate(dataset):
   idx += init_epoch
   if idx > args.train_step: break
 
-  loss = run_step(tf.cast(idx, tf.int64), data["pcm"], data["ref"])
+  loss = run_step(tf.cast(idx, tf.int64), data["pcm"])
   log_writer.flush()
 
   if idx > init_epoch and idx % args.eval_step == 0:
