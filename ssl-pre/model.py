@@ -91,6 +91,8 @@ class wav2vec2(tf.keras.layers.Layer):
 
     if self.pretrain:
       self.masks = [mpd_mask() for _ in range(len(self.conv_layers))]
+    else:
+      self.masks = [None for _ in range(len(self.conv_layers))]
   
   def call(self, inputs, training=None):
     x = inputs
