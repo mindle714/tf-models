@@ -1,0 +1,4 @@
+#!/usr/bin/bash
+
+cat /dev/stdin | gnuplot -p -e \
+  "set terminal dumb size 80, 20; set autoscale; plot '-' using 1 with lines notitle"

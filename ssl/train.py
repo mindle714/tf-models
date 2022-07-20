@@ -24,7 +24,8 @@ parser.add_argument("--lr-decay-rate", type=float, required=False, default=0.96)
 parser.add_argument("--lr-decay-step", type=float, required=False, default=2000.)
 parser.add_argument("--val-lr-update", type=float, required=False, default=3) 
 parser.add_argument("--output", type=str, required=True) 
-parser.add_argument("--warm-start", type=str, required=False, default=None) 
+parser.add_argument("--warm-start", type=str, required=False, default=None)
+parser.add_argument("--from-init", action='store_true')
 args = parser.parse_args()
 
 import json
@@ -86,8 +87,8 @@ if args.val_tfrec is not None:
 lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
-import wav2vec2
-m = wav2vec2.wav2vec2_unet()
+import model
+m = model.wav2vec2_unet()
 
 specs = [val.__spec__ for name, val in sys.modules.items() \
   if isinstance(val, types.ModuleType) and not ('_main_' in name)]
@@ -135,32 +136,34 @@ if args.warm_start is not None:
   logger.info("warm start from {}".format(args.warm_start))
 
   expdir = os.path.abspath(os.path.dirname(args.warm_start))
-  expname = expdir.split("/")[-1]
-  init_epoch = os.path.basename(args.warm_start).replace(".", "-").split("-")[1]
-  try:
-    init_epoch = int(init_epoch)
-  except:
-    init_epoch = 0
 
-  opt_weight = os.path.join(expdir, "adam-{}-weight.npy".format(init_epoch))
-  opt_cfg = os.path.join(expdir, "adam-{}-config.npy".format(init_epoch))
+  if not args.from_init:
+    init_epoch = os.path.basename(args.warm_start).replace(".", "-").split("-")[1]
+    try:
+      init_epoch = int(init_epoch)
+    except:
+      init_epoch = 0
 
-  if os.path.isfile(opt_cfg):
-    opt_weight = np.load(opt_weight, allow_pickle=True)
-    opt_cfg = np.load(opt_cfg, allow_pickle=True).flatten()[0] 
+    opt_weight = os.path.join(expdir, "adam-{}-weight.npy".format(init_epoch))
+    opt_cfg = os.path.join(expdir, "adam-{}-config.npy".format(init_epoch))
+
+    if os.path.isfile(opt_weight) and os.path.isfile(opt_cfg):
+      opt_weight = np.load(opt_weight, allow_pickle=True)
+      opt_cfg = np.load(opt_cfg, allow_pickle=True).flatten()[0] 
 
   _in = np.zeros((args.batch_size, samp_len), dtype=np.float32)
   _ = m((_in, None))
   ckpt.read(args.warm_start)
 
-  if os.path.isfile(opt_cfg):
-    opt = tf.keras.optimizers.Adam.from_config(opt_cfg)
-    lr.assign(opt_cfg["learning_rate"])
+  if not args.from_init:
+    if isinstance(opt_weight, np.ndarray):
+      opt = tf.keras.optimizers.Adam.from_config(opt_cfg)
+      lr.assign(opt_cfg["learning_rate"])
 
-    grad_vars = m.trainable_weights
-    zero_grads = [tf.zeros_like(w) for w in grad_vars]
-    opt.apply_gradients(zip(zero_grads, grad_vars))
-    opt.set_weights(opt_weight)
+      grad_vars = m.trainable_weights
+      zero_grads = [tf.zeros_like(w) for w in grad_vars]
+      opt.apply_gradients(zip(zero_grads, grad_vars))
+      opt.set_weights(opt_weight)
 
 for idx, data in enumerate(dataset):
   idx += init_epoch

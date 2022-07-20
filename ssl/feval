@@ -3,7 +3,15 @@
 epoch=100000
 
 echo "epoch $epoch"
+printf "%20s\tPESQ    STOI    CSIG    CBAK    COVL    SSNR\n" ""
+
 for eval in *-${epoch}.eval; do 
-  suf="$(echo $eval | sed 's/\.eval//g' | cut -d- -f1)"; 
-  printf "$suf "; tail -n1 $eval | sed 's/final: //g'
-done | awk '{printf "%20s\t%.5f\t%.5f\n", $1, $2, $3}'
+  suf="$(echo $eval | sed 's/\.eval//g' | cut -d- -f1)";
+  if ! tail -n1 $eval | grep -q final; then
+    printf "%20s \tIN PROGRESS\n" $suf
+    continue
+  fi
+  printf "%20s\t" $suf; tail -n1 $eval | grep final | sed 's/final: //g' \
+    | awk '{printf "%.5f\t%.5f\t%.5f\t%.5f\t%.5f\t%.5f\n", $1, $2, $3, $4, $5, $6}'
+done
+#done | awk '{printf "%20s\t%.5f\t%.5f\n", $1, $2, $3}'
