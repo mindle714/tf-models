@@ -101,12 +101,15 @@ resname = "{}-{}".format(expname, epoch)
 evals = [e.strip().split() for e in open(args.eval_list, "r").readlines()]
 
 if args.save_result:
+  output = os.path.join("eval_output", expname)
+  os.makedirs(output, exist_ok=True)
+
   for idx, (_ref, _pcm) in enumerate(evals):
     hyp, pcm, ref = eval(_pcm, _ref)
 
-    soundfile.write("{}_orig_{}.wav".format(resname, idx), pcm, 16000)
-    soundfile.write("{}_hyp_{}.wav".format(resname, idx), hyp, 16000)
-    soundfile.write("{}_ref_{}.wav".format(resname, idx), ref, 16000)
+    soundfile.write(os.path.join(output, "{}_orig_{}.wav".format(resname, idx)), pcm, 16000)
+    soundfile.write(os.path.join(output, "{}_hyp_{}.wav".format(resname, idx)), hyp, 16000)
+    soundfile.write(os.path.join(output, "{}_ref_{}.wav".format(resname, idx)), ref, 16000)
 
 else:
   with open("{}.eval".format(resname), "w") as f:
