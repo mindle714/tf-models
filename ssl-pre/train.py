@@ -14,7 +14,7 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--tfrec", type=str, required=True) 
 parser.add_argument("--val-tfrec", type=str, required=False, default=None)
-parser.add_argument("--batch-size", type=int, required=False, default=8) 
+parser.add_argument("--batch-size", type=int, required=False, default=16) 
 parser.add_argument("--eval-step", type=int, required=False, default=100) 
 parser.add_argument("--save-step", type=int, required=False, default=1000) 
 parser.add_argument("--val-step", type=int, required=False, default=5000) 
@@ -88,7 +88,7 @@ lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
 import model
-m = model.wav2vec2_unet(pretrain=False)
+m = model.wav2vec2_unet(pretrain=True)
 
 specs = [val.__spec__ for name, val in sys.modules.items() \
   if isinstance(val, types.ModuleType) and not ('_main_' in name)]
@@ -107,17 +107,21 @@ log_writer.set_as_default()
 @tf.function
 def run_step(step, pcm, training=True):
   with tf.GradientTape() as tape, log_writer.as_default():
-    loss = m(pcm, training=training)
+    loss, pre_loss = m(pcm, training=training)
+
     loss = tf.math.reduce_mean(loss)
     tf.summary.scalar("loss", loss, step=step)
-    total_loss = loss
+    pre_loss = tf.math.reduce_mean(pre_loss)
+    tf.summary.scalar("pre_loss", pre_loss, step=step)
+
+    total_loss = loss + pre_loss
 
   if training:
     grads = tape.gradient(total_loss, m.trainable_weights)
     grads, _ = tf.clip_by_global_norm(grads, 5.)
     opt.apply_gradients(zip(grads, m.trainable_weights))
 
-  return loss
+  return loss, pre_loss
 
 import logging
 logger = tf.get_logger()
@@ -169,12 +173,12 @@ for idx, data in enumerate(dataset):
   idx += init_epoch
   if idx > args.train_step: break
 
-  loss = run_step(tf.cast(idx, tf.int64), data["pcm"])
+  loss, pre_loss = run_step(tf.cast(idx, tf.int64), data["pcm"])
   log_writer.flush()
 
   if idx > init_epoch and idx % args.eval_step == 0:
-    logger.info("gstep[{}] loss[{:.2f}] lr[{:.2e}]".format(
-      idx, loss, lr.numpy()))
+      logger.info("gstep[{}] loss[{:.2f}] pre-loss[{:.2f}] lr[{:.2e}]".format(
+      idx, loss, pre_loss, lr.numpy()))
 
   if val_dataset is None:
     # follow tf.keras.optimizers.schedules.ExponentialDecay
@@ -183,8 +187,9 @@ for idx, data in enumerate(dataset):
   elif idx > init_epoch and idx % args.val_step == 0:
     val_loss = 0; num_val = 0
     for val_data in val_dataset:
-      val_loss += run_step(tf.cast(idx, tf.int64),
+      loss, pre_loss = run_step(tf.cast(idx, tf.int64),
         val_data["pcm"], val_data["ref"], training=False)
+      val_loss += loss + pre_loss
       num_val += 1
     val_loss /= num_val
 
