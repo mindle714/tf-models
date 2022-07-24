@@ -196,6 +196,8 @@ class wav2vec2_unet(tf.keras.layers.Layer):
       spec_loss += stft_loss(x, ref, 50, 10, 2048)
       spec_loss += stft_loss(x, ref, 10, 2, 512)
 
-      return samp_loss + spec_loss, pre_loss
+      if self.pretrain:
+        return samp_loss + spec_loss, pre_loss
+      return samp_loss + spec_loss
 
     return x
