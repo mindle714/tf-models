@@ -16,6 +16,21 @@ def stft(
     pcm, frame_length=frame_length, frame_step=frame_step,
     fft_length=fft_length, window_fn=window_fn, pad_end=True)
 
+def istft(
+  stfts, sr=16000,
+  frame_length=25, frame_step=10, fft_length=None,
+  window_fn=functools.partial(tf.signal.hann_window, periodic=True)):
+  
+  frame_length = int(frame_length * sr / 1e3)
+  frame_step = int(frame_step * sr / 1e3)
+  if fft_length is None:
+    fft_length = int(2**(np.ceil(np.log2(frame_length))))
+
+  return tf.signal.inverse_stft(
+    stfts, frame_length=frame_length, frame_step=frame_step,
+    fft_length=fft_length, window_fn=tf.signal.inverse_stft_window_fn(
+      frame_step, forward_window_fn=window_fn))
+
 def mel_filterbank(
   pcm, sr=16000,
   frame_length=25, frame_step=10, fft_length=None,

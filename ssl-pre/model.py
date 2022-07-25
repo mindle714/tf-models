@@ -75,31 +75,16 @@ class wav2vec2(tf.keras.layers.Layer):
   def build(self, input_shape):
     ksizes = [3, 3, 3, 3, 2, 2]
     self.conv_layers = [gnormconv1d()] + [nonormconv1d(ksizes[i]) for i in range(6)]
-
-    if self.pretrain:
-      self.mask = mpd_mask(self.periods)
-    else:
-      self.mask = None
   
   def call(self, inputs, training=None):
     x = inputs
-    
-    batch_size = tf.shape(x)[0]
-    mask_idx = tf.random.uniform([batch_size],
-      maxval=len(self.conv_layers), dtype=tf.int32)
-    pd_idx = tf.random.uniform([batch_size], 
-      maxval=len(self.periods), dtype=tf.int32)
 
     fes = []
     for idx, conv in enumerate(self.conv_layers):
       fes.append(x)
       x = conv(x)
 
-      if self.pretrain:
-        _pd_idx = tf.where(idx == mask_idx, pd_idx, len(self.periods))
-        x = self.mask((x, _pd_idx))
-
-    return x, fes, mask_idx, pd_idx 
+    return x, fes 
 
 class wav2vec2_unet(tf.keras.layers.Layer):
   def __init__(self, pretrain=False, *args, **kwargs):
@@ -120,7 +105,8 @@ class wav2vec2_unet(tf.keras.layers.Layer):
 
     self.pre_conv_mid = conv1d(self.dims[-1], self.ksize, strides=5, **conv_opt)
     self.pre_conv_post = tf.keras.layers.Dense(
-      self.wav2vec2.get_vocab_size(), use_bias=False)
+#      250, use_bias=False)
+      32, use_bias=False)
 
     self.enc_convs = [tf.keras.layers.Dense(64) for _ in range(self.layer)]
     self.up_norms = [lnorm() for _ in range(self.layer)]
@@ -144,8 +130,35 @@ class wav2vec2_unet(tf.keras.layers.Layer):
       x = inputs
       ref = None
 
+    if self.pretrain:
+      x_len = tf.shape(x)[1]
+      pre_f = stft(x)
+      f_len = tf.shape(pre_f)[1]
+
+      mask_len = 16
+      batch_size = tf.shape(x)[0]
+      mask_idx = tf.random.uniform([batch_size], 
+        maxval=(f_len-mask_len+1)//16, dtype=tf.int32)
+
+      def _map_fn(e):
+        idx, _x = e[0], e[1]
+      
+        mask = tf.concat([
+          tf.ones(idx*16, dtype=tf.float32),
+          tf.zeros(mask_len, dtype=tf.float32),
+          tf.ones(f_len-idx*16-mask_len, dtype=tf.float32)
+        ], 0)
+        mask = tf_expd(mask, -1)
+
+        return mask
+
+      mask = tf.map_fn(_map_fn, (mask_idx, x), fn_output_signature=tf.float32)
+      pre_f_mask = pre_f * tf.complex(mask, 0.)
+      x = istft(pre_f_mask)
+      x = x[:, :x_len]
+
     x = tf_expd(x, -1)
-    x, fes, mask_idx, pd_idx = self.wav2vec2(x)
+    x, fes = self.wav2vec2(x)
     x = gelu(x)
 
     if self.pretrain:
@@ -153,9 +166,9 @@ class wav2vec2_unet(tf.keras.layers.Layer):
       pre_x = tf.math.reduce_mean(pre_x, 1)
       pre_x = self.pre_conv_post(pre_x)
 
-      vocab_idx = self.wav2vec2.get_vocab_idx(mask_idx, pd_idx)
       pre_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
-        labels=vocab_idx, logits=pre_x)
+        labels=mask_idx,
+        logits=pre_x)
 
     x = self.conv_mid(x)
    
