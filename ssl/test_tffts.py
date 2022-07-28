@@ -10,8 +10,8 @@ rxs, ixs = m(np.reshape(a, [1, 1, N]))
 rx = rxs[-1].numpy(); ix = ixs[-1].numpy()
 assert np.allclose(np.fft.fft(a), rx + 1j * ix)
 
-im = tffts.itfft(N)
-x = im((rx, ix))
+im = tffts.tfft(N)
+x = im((rx, ix), inverse=True)
 assert np.allclose(x, a)
 
 '''
