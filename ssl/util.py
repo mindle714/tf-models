@@ -2,6 +2,72 @@ import tensorflow as tf
 import functools
 import numpy as np
 
+tf_sum = tf.math.reduce_sum
+tf_expd = tf.expand_dims
+
+def log10(x):
+  num = tf.math.log(x)
+  denom = tf.math.log(tf.constant(10, dtype=num.dtype))
+  return num / denom
+
+import itertools
+
+# ref[batch, timestep, mixture], hyp[..]
+def si_snr(ref, hyp, mask=None, pit=True, eps=1e-8):
+  def norm_mean(e):
+    if mask is not None:
+      m, _ = tf.nn.weighted_moments(e, [1], mask, keepdims=True)
+    else:
+      m, _ = tf.nn.moments(e, [1], keepdims=True)
+
+    return e - m
+
+  ref = norm_mean(ref)
+  hyp = norm_mean(hyp)
+
+  if pit:
+    ref = tf_expd(ref, -2)
+    hyp = tf_expd(hyp, -1)
+
+  if mask is not None:
+    mask = tf_expd(mask, -1)
+    # s_tgt = <s,s'>s/||s||^2
+    s_tgt = tf_sum((ref * hyp) * mask, 1, keepdims=True)
+    s_tgt = s_tgt * ref / (tf_sum((ref**2) * mask, 1, keepdims=True) + eps)
+  
+    e_ns = hyp - s_tgt
+    snr = tf_sum((s_tgt**2) * mask, 1) / (tf_sum((e_ns**2) * mask, 1) + eps)
+    snr = 10 * log10(snr)
+
+  else:
+    # s_tgt = <s,s'>s/||s||^2
+    s_tgt = tf_sum((ref * hyp), 1, keepdims=True)
+    s_tgt = s_tgt * ref / (tf_sum((ref**2), 1, keepdims=True) + eps)
+  
+    e_ns = hyp - s_tgt
+    snr = tf_sum((s_tgt**2), 1) / (tf_sum((e_ns**2), 1) + eps)
+    snr = 10 * log10(snr)
+
+  if pit:
+    num_mix = snr.shape[-1]
+    perms = tf.one_hot(list(itertools.permutations(range(num_mix))), num_mix)
+    # perms[batch, num_mix, num_mix]
+    snr = tf_expd(snr, 1) * tf_expd(perms, 0)
+    snr = tf_sum(tf_sum(snr, -1), -1)
+
+    batch = tf.shape(snr)[0]
+    perm_id = tf.math.argmax(snr, -1)
+    perm_id_bat = tf.concat([
+      tf_expd(tf.range(batch, dtype=perm_id.dtype), -1), tf_expd(perm_id, -1)], -1)
+
+    max_snr = tf.gather_nd(snr, perm_id_bat) / num_mix
+    max_perm = tf.gather(perms, perm_id)
+    sort_hyp = tf.linalg.matmul(tf.squeeze(hyp, -1), max_perm)
+
+    return max_snr, sort_hyp
+
+  return snr, hyp
+
 def stft(
   pcm, sr=16000,
   frame_length=25, frame_step=10, fft_length=None,
