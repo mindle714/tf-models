@@ -68,12 +68,6 @@ class wav2vec2(tf.keras.layers.Layer):
     self.periods = [2,3,5,7,11]
     super(wav2vec2, self).__init__()
 
-  def get_vocab_size(self):
-    return 7 * len(self.periods)
-
-  def get_vocab_idx(self, mask_idx, pd_idx):
-    return mask_idx * len(self.periods) + pd_idx
-
   def build(self, input_shape):
     ksizes = [3, 3, 3, 3, 2, 2]
     self.conv_layers = [gnormconv1d()] + [nonormconv1d(ksizes[i]) for i in range(6)]
@@ -88,10 +82,32 @@ class wav2vec2(tf.keras.layers.Layer):
 
     return x, fes 
 
+class tconv(tf.keras.layers.Layer):
+  def __init__(self, *args, **kwargs):
+    self.conv_args = args
+    self.conv_kwargs = kwargs
+    super(tconv, self).__init__()
+
+  def build(self, input_shape):
+    conv_opt = dict(padding='same')
+
+    self.dconv = conv1d(self.conv_args[0], 4, groups=8, **conv_opt)
+
+    pconv_args = (self.conv_args[0], 1)
+    self.pconv = conv1d(*pconv_args, **conv_opt)
+  
+  def call(self, inputs, training=None):
+    rx, ix = inputs
+
+    x = gelu(rx + ix)
+    x = self.pconv(self.dconv(x))
+
+    return x 
+
 class tffts_unet(tf.keras.layers.Layer):
   def __init__(self, pretrain=False, *args, **kwargs):
-    self.flens = [512, 256, 128]
-    self.hlens = [128, 64, 32]
+    self.flens = [128, 64, 32]
+    self.hlens = [32, 16, 8]
     for flen in self.flens:
       assert 2**(np.log2(flen)) == flen
     super(tffts_unet, self).__init__()
@@ -107,8 +123,10 @@ class tffts_unet(tf.keras.layers.Layer):
     conv_opt = dict(padding='same', use_bias=False)
     
     self.tffts = [tfft(flen) for flen in self.flens]
-    self.tfft_prjs = [conv1d(hlen, 3, strides=1, **conv_opt) for hlen in self.hlens]
-    self.itfft_prjs = [conv1d(2*flen, 3, strides=1, **conv_opt) for flen in self.flens]
+    self.tfft_rprjs = [conv1d(hlen, 1, strides=1, **conv_opt) for hlen in self.hlens]
+    self.tfft_iprjs = [conv1d(hlen, 1, strides=1, **conv_opt) for hlen in self.hlens]
+    self.itfft_rprjs = [conv1d(flen, 1, strides=1, **conv_opt) for flen in self.flens]
+    self.itfft_iprjs = [conv1d(flen, 1, strides=1, **conv_opt) for flen in self.flens]
 
     self.wav2vec2 = wav2vec2(self.pretrain)
 
@@ -127,7 +145,7 @@ class tffts_unet(tf.keras.layers.Layer):
       [[conv1d(None, self.ksize,
         strides=1, **conv_opt) for _ in range(self.sublayer)] for idx in range(self.layer)]))
 
-    self.enc_post = conv1d(1, self.ksize, **conv_opt)
+    self.enc_post = conv1d(1+2*len(self.tffts), self.ksize, **conv_opt)
     self.conv_post = conv1d(1, self.ksize, **conv_opt)
 
   # inputs[batch, seq]
@@ -143,18 +161,19 @@ class tffts_unet(tf.keras.layers.Layer):
       x = inputs
       ref = None
 
+    batch_size = tf.shape(x)[0]
     slen = tf.shape(x)[1]
     fxs = []
 
-    for tfft, tfft_prj, flen, hlen in zip(
-      self.tffts, self.tfft_prjs, self.flens, self.hlens):
+    for tfft, tfft_rprj, tfft_iprj, flen, hlen in zip(
+      self.tffts, self.tfft_rprjs, self.tfft_iprjs, self.flens, self.hlens):
 
       fx = tf.signal.frame(x, frame_length=flen, 
         frame_step=hlen, pad_end=True)
       rx, ix = tfft(fx)
 
-      _fxs = [tf.reshape(tfft_prj(e), 
-        [tf.shape(e)[0], -1, 1]) for e in [rx, ix]]
+      _fxs = [tf.reshape(tfft_rprj(rx), [batch_size, -1, 1]),
+              tf.reshape(tfft_iprj(ix), [batch_size, -1, 1])]
       fxs += _fxs
 
     fx = tf.concat(fxs, -1)
@@ -186,14 +205,17 @@ class tffts_unet(tf.keras.layers.Layer):
       idx += 1
     
     x = gelu(self.enc_post(x))
+    xs = tf.split(x, 1+2*len(self.tffts), -1)
+    x = xs[-1]; xs = [(xs[2*i], xs[2*i+1]) for i in range(len(self.tffts))]
 
     fxs = []
 
-    for itfft, itfft_prj, flen, hlen in zip(
-      self.tffts, self.itfft_prjs, self.flens, self.hlens):
+    for (rx, ix), itfft, itfft_rprj, itfft_iprj, hlen in zip(
+      xs, self.tffts, self.itfft_rprjs, self.itfft_iprjs, self.hlens):
 
-      fx = tf.reshape(x, [tf.shape(x)[0], -1, hlen])
-      fx_r, fx_i = tf.split(itfft_prj(fx), 2, axis=-1)
+      fx_r = itfft_rprj(tf.reshape(rx, [batch_size, -1, hlen]))
+      fx_i = itfft_iprj(tf.reshape(ix, [batch_size, -1, hlen]))
+
       fx = itfft((fx_r, fx_i), inverse=True)
       fx = tf_expd(tf.signal.overlap_and_add(fx, hlen)[:, :slen], -1)
       fxs.append(fx)
