@@ -1,2 +1,5 @@
 __pycache__/
 *.eval
+exps/
+*.ckpt.*
+eval_output/
