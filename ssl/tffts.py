@@ -2,6 +2,7 @@ import tensorflow as tf
 import numpy as np
 from util import *
 import fftlib
+import scipy.signal
 
 tf_sum = tf.math.reduce_sum
 tf_expd = tf.expand_dims
@@ -258,8 +259,11 @@ class tfft(tf.keras.layers.Layer):
     super(tfft, self).__init__()
 
   def build(self, input_shape):
+    def init_window(shape, dtype=None):
+      return scipy.signal.get_window('hann', shape[-1]).reshape(shape)
+
     self.window = self.add_weight(
-      shape=(1, 1, self.nfft), initializer='ones',
+      shape=(1, 1, self.nfft), initializer=init_window,
       name='window', trainable=True)
 
     self.rconvs = []
@@ -402,5 +406,6 @@ class tstft(tf.keras.layers.Layer):
       win_sq = win_sq ** 2
       win_sq = tf.signal.overlap_and_add(win_sq, self.hlen)
 
-      _x = tf.where(win_sq > 1e-10, _x / win_sq, _x)
+      # tf.math.maximum is used to prevent nan on back-prop
+      _x = tf.where(win_sq > 1e-10, _x / tf.math.maximum(win_sq, 1e-10), _x)
       return _x
