@@ -34,7 +34,7 @@ print_epoch() {
       score5="$(cat $eval | awk '{s+=$5} END{print s/NR}')"
       score6="$(cat $eval | awk '{s+=$6} END{print s/NR}')"
       len="$(wc -l $eval | awk '{print $1}')"
-      printf "%20s \t%.5f\t%.5f\t%.5f\t%.5f\t%.5f\t%.5f\tIN PROGRESS(%d)\n" $suf $score1 $score2 $score3 $score4 $score5 $score6 $len
+      printf "%20s \t%.5f\t%.5f\t%.5f\t%.5f\t%.5f\t%.5f   IN PROGRESS(%d)\n" $suf $score1 $score2 $score3 $score4 $score5 $score6 $len
       continue
     fi
     printf "%20s\t" $suf; tail -n1 $eval | grep final | sed 's/final: //g' \
