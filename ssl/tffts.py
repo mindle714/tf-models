@@ -98,17 +98,15 @@ class tconv(tf.keras.layers.Layer):
     self.pconv = conv1d(*pconv_args, **conv_opt)
   
   def call(self, inputs, training=None):
-    rx, ix = inputs
-
-    x = gelu(rx + ix)
+    x = inputs
     x = self.pconv(self.dconv(x))
 
     return x 
 
 class tffts_unet(tf.keras.layers.Layer):
   def __init__(self, pretrain=False, *args, **kwargs):
-    self.flens = [128, 64, 32]
-    self.hlens = [32, 16, 8]
+    self.flens = [512, 256, 128]
+    self.hlens = [128, 64, 32]
     for flen in self.flens:
       assert 2**(np.log2(flen)) == flen
     super(tffts_unet, self).__init__()
@@ -124,10 +122,11 @@ class tffts_unet(tf.keras.layers.Layer):
     conv_opt = dict(padding='same', use_bias=False)
     
     self.tstfts = [tstft(flen, hlen) for flen, hlen in zip(self.flens, self.hlens)]
-    self.tfft_rprjs = [conv1d(hlen, 1, strides=1, **conv_opt) for hlen in self.hlens]
-    self.tfft_iprjs = [conv1d(hlen, 1, strides=1, **conv_opt) for hlen in self.hlens]
-    self.itfft_rprjs = [conv1d(flen, 1, strides=1, **conv_opt) for flen in self.flens]
-    self.itfft_iprjs = [conv1d(flen, 1, strides=1, **conv_opt) for flen in self.flens]
+    self.itstfts = [tstft(flen, hlen) for flen, hlen in zip(self.flens, self.hlens)]
+    self.tfft_rprjs = [conv2d(1, (8,8), strides=(2,2), **conv_opt) for _ in self.hlens]
+    self.tfft_iprjs = [conv2d(1, (8,8), strides=(2,2), **conv_opt) for _ in self.hlens]
+    self.itfft_rprjs = [conv2dtrans(1, (8,8), strides=(2,2), **conv_opt) for _ in self.flens]
+    self.itfft_iprjs = [conv2dtrans(1, (8,8), strides=(2,2), **conv_opt) for _ in self.flens]
 
     self.wav2vec2 = wav2vec2(self.pretrain)
 
@@ -146,7 +145,7 @@ class tffts_unet(tf.keras.layers.Layer):
       [[conv1d(None, self.ksize,
         strides=1, **conv_opt) for _ in range(self.sublayer)] for idx in range(self.layer)]))
 
-    self.enc_post = conv1d(1+2*len(self.tstfts), self.ksize, **conv_opt)
+    self.enc_post = conv1d(1+2*len(self.flens), self.ksize, **conv_opt)
     self.conv_post = conv1d(1, self.ksize, **conv_opt)
 
   # inputs[batch, seq]
@@ -169,8 +168,8 @@ class tffts_unet(tf.keras.layers.Layer):
     for tstft, tfft_rprj, tfft_iprj in zip(self.tstfts, self.tfft_rprjs, self.tfft_iprjs):
       rx, ix = tstft(x)
 
-      _fxs = [tf.reshape(tfft_rprj(rx), [batch_size, -1, 1]),
-              tf.reshape(tfft_iprj(ix), [batch_size, -1, 1])]
+      _fxs = [tf.reshape(tfft_rprj(tf_expd(rx, -1)), [batch_size, -1, 1]),
+              tf.reshape(tfft_iprj(tf_expd(ix, -1)), [batch_size, -1, 1])]
       fxs += _fxs
 
     fx = tf.concat(fxs, -1)
@@ -202,16 +201,18 @@ class tffts_unet(tf.keras.layers.Layer):
       idx += 1
     
     x = gelu(self.enc_post(x))
-    xs = tf.split(x, 1+2*len(self.tstfts), -1)
-    x = xs[-1]; xs = [(xs[2*i], xs[2*i+1]) for i in range(len(self.tstfts))]
+    xs = tf.split(x, 1+2*len(self.flens), -1)
+    x = xs[-1]; xs = [(xs[2*i], xs[2*i+1]) for i in range(len(self.flens))]
 
     fxs = []
 
     for (rx, ix), itstft, itfft_rprj, itfft_iprj, hlen in zip(
-      xs, self.tstfts, self.itfft_rprjs, self.itfft_iprjs, self.hlens):
+      xs, self.itstfts, self.itfft_rprjs, self.itfft_iprjs, self.hlens):
 
-      fx_r = itfft_rprj(tf.reshape(rx, [batch_size, -1, hlen]))
-      fx_i = itfft_iprj(tf.reshape(ix, [batch_size, -1, hlen]))
+      fx_r = itfft_rprj(tf.reshape(rx, [batch_size, -1, hlen*2, 1]))
+      fx_i = itfft_iprj(tf.reshape(ix, [batch_size, -1, hlen*2, 1]))
+      fx_r = tf.squeeze(fx_r, -1)
+      fx_i = tf.squeeze(fx_i, -1)
 
       fx = itstft((fx_r, fx_i), inverse=True)
       fx = tf_expd(fx[:, :slen], -1)
