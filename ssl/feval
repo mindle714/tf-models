@@ -1,17 +1,55 @@
 #!/usr/bin/bash
 
-epoch=100000
+USAGE="Usage: $0 -e <epoch>"
+EXAMPLE="($0 -e 10000)"
 
-echo "epoch $epoch"
-printf "%20s\tPESQ    STOI    CSIG    CBAK    COVL    SSNR\n" ""
-
-for eval in *-${epoch}.eval; do 
-  suf="$(echo $eval | sed 's/\.eval//g' | cut -d- -f1)";
-  if ! tail -n1 $eval | grep -q final; then
-    printf "%20s \tIN PROGRESS\n" $suf
-    continue
-  fi
-  printf "%20s\t" $suf; tail -n1 $eval | grep final | sed 's/final: //g' \
-    | awk '{printf "%.5f\t%.5f\t%.5f\t%.5f\t%.5f\t%.5f\n", $1, $2, $3, $4, $5, $6}'
+unset epochs;
+while getopts ":e:" opt; do
+  case $opt in
+    e) epochs+=("$OPTARG") ;;
+    ?) echo "$USAGE"; echo "$EXAMPLE"; exit 2 ;;
+  esac
 done
-#done | awk '{printf "%20s\t%.5f\t%.5f\n", $1, $2, $3}'
+
+print_epoch() {
+  epoch="$1"
+
+  if [ "$(echo *-${epoch}.eval)" == "*-${epoch}.eval" ]; then
+    echo "epoch ${epoch} does not exist"
+    return
+  fi
+
+  echo "epoch $epoch"
+  printf "%20s\tPESQ    STOI    CSIG    CBAK    COVL    SSNR\n" ""
+
+  for eval in *-${epoch}.eval; do
+    if echo $eval | grep -q sep; then continue; fi
+
+    suf="$(echo $eval | sed 's/\.eval//g' | cut -d- -f1)";
+    if ! tail -n1 $eval | grep -q final; then
+      score1="$(cat $eval | awk '{s+=$1} END{print s/NR}')"
+      score2="$(cat $eval | awk '{s+=$2} END{print s/NR}')"
+      score3="$(cat $eval | awk '{s+=$3} END{print s/NR}')"
+      score4="$(cat $eval | awk '{s+=$4} END{print s/NR}')"
+      score5="$(cat $eval | awk '{s+=$5} END{print s/NR}')"
+      score6="$(cat $eval | awk '{s+=$6} END{print s/NR}')"
+      len="$(wc -l $eval | awk '{print $1}')"
+      printf "%20s \t%.5f\t%.5f\t%.5f\t%.5f\t%.5f\t%.5f   IN PROGRESS(%d)\n" $suf $score1 $score2 $score3 $score4 $score5 $score6 $len
+      continue
+    fi
+    printf "%20s\t" $suf; tail -n1 $eval | grep final | sed 's/final: //g' \
+      | awk '{printf "%.5f\t%.5f\t%.5f\t%.5f\t%.5f\t%.5f\n", $1, $2, $3, $4, $5, $6}'
+  done
+}
+
+if [ -z ${epochs+x} ]; then
+  epochs="$(ls *.eval | grep -o "\-[0-9]*\.eval" | cut -d- -f2 | cut -d. -f1 | sort -k1 -n | uniq)"
+  for epoch in $epochs; do
+    print_epoch $epoch
+  done
+else
+  for epoch in "${epochs[@]}"; do
+    print_epoch $epoch
+  done
+fi
+

@@ -1,7 +1,8 @@
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--ckpt", type=str, required=True) 
-parser.add_argument("--eval-list", type=str, required=False, default="/home/hejung/voicebank-demand/testset.list")
+parser.add_argument("--eval-list", type=str, required=False, 
+  default="/data/hejung/voicebank-demand/testset.list")
 parser.add_argument("--save-result", action="store_true") 
 args = parser.parse_args()
 
@@ -59,8 +60,17 @@ elif expname.startswith("data2vec"):
     sys.exit("data2vec is loaded from {}".format(data2vec.__file__))
   m = data2vec.data2vec_unet()
 
+elif expname.startswith("tffts"):
+  import tffts
+  if os.path.dirname(tffts.__file__) != expdir:
+    sys.exit("tffts is loaded from {}".format(tffts.__file__))
+  m = tffts.tffts_unet()
+
 else:
-  assert False, "undefined model type {}".format(expname)
+  import model
+  if os.path.dirname(model.__file__) != expdir:
+    sys.exit("model is loaded from {}".format(model.__file__))
+  m = model.wav2vec2_unet()
 
 import numpy as np
 _in = np.zeros((1, 32000), dtype=np.float32)

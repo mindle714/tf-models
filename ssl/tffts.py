@@ -2,6 +2,7 @@ import tensorflow as tf
 import numpy as np
 from util import *
 import fftlib
+import scipy.signal
 
 tf_sum = tf.math.reduce_sum
 tf_expd = tf.expand_dims
@@ -68,12 +69,6 @@ class wav2vec2(tf.keras.layers.Layer):
     self.periods = [2,3,5,7,11]
     super(wav2vec2, self).__init__()
 
-  def get_vocab_size(self):
-    return 7 * len(self.periods)
-
-  def get_vocab_idx(self, mask_idx, pd_idx):
-    return mask_idx * len(self.periods) + pd_idx
-
   def build(self, input_shape):
     ksizes = [3, 3, 3, 3, 2, 2]
     self.conv_layers = [gnormconv1d()] + [nonormconv1d(ksizes[i]) for i in range(6)]
@@ -88,11 +83,32 @@ class wav2vec2(tf.keras.layers.Layer):
 
     return x, fes 
 
+class tconv(tf.keras.layers.Layer):
+  def __init__(self, *args, **kwargs):
+    self.conv_args = args
+    self.conv_kwargs = kwargs
+    super(tconv, self).__init__()
+
+  def build(self, input_shape):
+    conv_opt = dict(padding='same')
+
+    self.dconv = conv1d(self.conv_args[0], 4, groups=8, **conv_opt)
+
+    pconv_args = (self.conv_args[0], 1)
+    self.pconv = conv1d(*pconv_args, **conv_opt)
+  
+  def call(self, inputs, training=None):
+    x = inputs
+    x = self.pconv(self.dconv(x))
+
+    return x 
+
 class tffts_unet(tf.keras.layers.Layer):
-  def __init__(self, flen, hlen, pretrain=False, *args, **kwargs):
-    self.flen = flen
-    self.hlen = hlen
-    assert 2**(np.log2(flen)) == flen
+  def __init__(self, pretrain=False, *args, **kwargs):
+    self.flens = [512, 256, 128]
+    self.hlens = [128, 64, 32]
+    for flen in self.flens:
+      assert 2**(np.log2(flen)) == flen
     super(tffts_unet, self).__init__()
     self.pretrain = pretrain
     self.layer = 7
@@ -105,7 +121,13 @@ class tffts_unet(tf.keras.layers.Layer):
   def build(self, input_shape):
     conv_opt = dict(padding='same', use_bias=False)
     
-    self.tfft = tfft(self.flen)
+    self.tstfts = [tstft(flen, hlen) for flen, hlen in zip(self.flens, self.hlens)]
+    self.itstfts = [tstft(flen, hlen) for flen, hlen in zip(self.flens, self.hlens)]
+    self.tfft_rprjs = [conv2d(1, (8,8), strides=(2,2), **conv_opt) for _ in self.hlens]
+    self.tfft_iprjs = [conv2d(1, (8,8), strides=(2,2), **conv_opt) for _ in self.hlens]
+    self.itfft_rprjs = [conv2dtrans(1, (8,8), strides=(2,2), **conv_opt) for _ in self.flens]
+    self.itfft_iprjs = [conv2dtrans(1, (8,8), strides=(2,2), **conv_opt) for _ in self.flens]
+
     self.wav2vec2 = wav2vec2(self.pretrain)
 
     self.conv_mid = conv1d(self.dims[-1], self.ksize, **conv_opt)
@@ -123,6 +145,7 @@ class tffts_unet(tf.keras.layers.Layer):
       [[conv1d(None, self.ksize,
         strides=1, **conv_opt) for _ in range(self.sublayer)] for idx in range(self.layer)]))
 
+    self.enc_post = conv1d(1+2*len(self.flens), self.ksize, **conv_opt)
     self.conv_post = conv1d(1, self.ksize, **conv_opt)
 
   # inputs[batch, seq]
@@ -138,16 +161,19 @@ class tffts_unet(tf.keras.layers.Layer):
       x = inputs
       ref = None
 
+    batch_size = tf.shape(x)[0]
     slen = tf.shape(x)[1]
+    fxs = []
 
-    fx = tf.signal.frame(x, frame_length=self.flen, 
-      frame_step=self.hlen, pad_end=True)
-    rxs, ixs = self.tfft(fx)
+    for tstft, tfft_rprj, tfft_iprj in zip(self.tstfts, self.tfft_rprjs, self.tfft_iprjs):
+      rx, ix = tstft(x)
 
-    fxs = [tf.reshape(tf.signal.overlap_and_add(e, frame_step=self.hlen),
-      [tf.shape(e)[0], -1, 1]) for e in rxs + ixs]
-    x = tf.concat(fxs, -1)
-    x = x[:, :slen, :]
+      _fxs = [tf.reshape(tfft_rprj(tf_expd(rx, -1)), [batch_size, -1, 1]),
+              tf.reshape(tfft_iprj(tf_expd(ix, -1)), [batch_size, -1, 1])]
+      fxs += _fxs
+
+    fx = tf.concat(fxs, -1)
+    x = tf.concat([fx, tf_expd(x, -1)], -1)
     
     x, fes = self.wav2vec2(x)
     x = gelu(x)
@@ -174,6 +200,27 @@ class tffts_unet(tf.keras.layers.Layer):
         x = gelu(conv(x)) + x
       idx += 1
     
+    x = gelu(self.enc_post(x))
+    xs = tf.split(x, 1+2*len(self.flens), -1)
+    x = xs[-1]; xs = [(xs[2*i], xs[2*i+1]) for i in range(len(self.flens))]
+
+    fxs = []
+
+    for (rx, ix), itstft, itfft_rprj, itfft_iprj, hlen in zip(
+      xs, self.itstfts, self.itfft_rprjs, self.itfft_iprjs, self.hlens):
+
+      fx_r = itfft_rprj(tf.reshape(rx, [batch_size, -1, hlen*2, 1]))
+      fx_i = itfft_iprj(tf.reshape(ix, [batch_size, -1, hlen*2, 1]))
+      fx_r = tf.squeeze(fx_r, -1)
+      fx_i = tf.squeeze(fx_i, -1)
+
+      fx = itstft((fx_r, fx_i), inverse=True)
+      fx = tf_expd(fx[:, :slen], -1)
+      fxs.append(fx)
+
+    fx = tf.concat(fxs, -1)
+    x = tf.concat([fx, x], -1)
+
     x = self.conv_post(x)
     x = tf.math.tanh(x)
     x = tf.squeeze(x, -1)
@@ -213,6 +260,13 @@ class tfft(tf.keras.layers.Layer):
     super(tfft, self).__init__()
 
   def build(self, input_shape):
+    def init_window(shape, dtype=None):
+      return scipy.signal.get_window('hann', shape[-1]).reshape(shape)
+
+    self.window = self.add_weight(
+      shape=(1, 1, self.nfft), initializer=init_window,
+      name='window', trainable=True)
+
     self.rconvs = []
     self.iconvs = []
 
@@ -269,65 +323,90 @@ class tfft(tf.keras.layers.Layer):
       tf.expand_dims(filt, 1), stride=stride, padding='SAME')
  
   # inputs[batch, seq, self.nfft]
-  def call(self, inputs, training=None):
-    x = inputs
-    rx = x
-    ix = tf.zeros_like(x)
+  def call(self, inputs, inverse=False, training=None):
+    if not inverse:
+      x = inputs
+      x *= self.window
 
-    rx = tf.linalg.matmul(rx, self.perm)
-    numf = tf.shape(rx)[1]
+      rx = x
+      ix = tf.zeros_like(x)
 
-    rxs = []; ixs = []
-    rxs.append(rx); ixs.append(ix)
+      rx = tf.linalg.matmul(rx, self.perm)
+      numf = tf.shape(rx)[1]
 
-    for i in range(int(np.log2(self.nfft))):
-      subdim = 2**(i+1)
+      for i in range(int(np.log2(self.nfft))):
+        subdim = 2**(i+1)
 
-      rx = tf.reshape(rx, [tf.shape(rx)[0], -1, 1]) 
-      ix = tf.reshape(ix, [tf.shape(ix)[0], -1, 1]) 
+        rx = tf.reshape(rx, [tf.shape(rx)[0], -1, 1]) 
+        ix = tf.reshape(ix, [tf.shape(ix)[0], -1, 1]) 
 
-      _rrx = self.conv(rx, self.rconvs[i], subdim)
-      _iix = self.conv(ix, self.iconvs[i], subdim)
-      _rix = self.conv(ix, self.rconvs[i], subdim)
-      _irx = self.conv(rx, self.iconvs[i], subdim)
+        _rrx = self.conv(rx, self.rconvs[i], subdim)
+        _iix = self.conv(ix, self.iconvs[i], subdim)
+        _rix = self.conv(ix, self.rconvs[i], subdim)
+        _irx = self.conv(rx, self.iconvs[i], subdim)
 
-      rx = _rrx - _iix
-      ix = _rix + _irx
+        rx = _rrx - _iix
+        ix = _rix + _irx
 
-      rx = tf.reshape(rx, [tf.shape(rx)[0], numf, -1])
-      ix = tf.reshape(ix, [tf.shape(ix)[0], numf, -1])
+        rx = tf.reshape(rx, [tf.shape(rx)[0], numf, -1])
+        ix = tf.reshape(ix, [tf.shape(ix)[0], numf, -1])
+    
+      return rx, ix
 
-      rxs.append(rx); ixs.append(ix)
+    else:
+      rx, ix = inputs
+    
+      rx = tf.linalg.matmul(rx, self.perm)
+      ix = tf.linalg.matmul(-ix, self.perm)
 
-    return rxs, ixs
+      for i in range(int(np.log2(self.nfft))):
+        subdim = 2**(i+1)
+        rx = tf.reshape(rx, [tf.shape(rx)[0], -1, 1]) 
+        ix = tf.reshape(ix, [tf.shape(ix)[0], -1, 1]) 
 
-class itfft(tfft):
-  def __init__(self, nfft, *args, **kwargs):
+        _rrx = self.conv(rx, self.rconvs[i], subdim)
+        _iix = self.conv(ix, self.iconvs[i], subdim)
+        _rix = self.conv(ix, self.rconvs[i], subdim)
+        _irx = self.conv(rx, self.iconvs[i], subdim)
+
+        rx = _rrx - _iix
+        ix = _rix + _irx
+
+      rx = rx / self.nfft
+      ix = ix / self.nfft
+
+      return tf.math.sqrt(rx**2 + ix**2) * tf.squeeze(self.window, 0)
+
+class tstft(tf.keras.layers.Layer):
+  def __init__(self, nfft, hlen, *args, **kwargs):
     assert 2**(np.log2(nfft)) == nfft
     self.nfft = nfft
-    super(itfft, self).__init__(nfft)
+    self.hlen = hlen
+    super(tstft, self).__init__()
+
+  def build(self, input_shape):
+    self.tfft = tfft(self.nfft)
  
   # inputs[batch, seq, self.nfft]
-  def call(self, inputs, training=None):
-    rx, ix = inputs
-    
-    rx = tf.linalg.matmul(rx, self.perm)
-    ix = tf.linalg.matmul(-ix, self.perm)
+  def call(self, inputs, inverse=False, training=None):
+    if not inverse:
+      x = inputs
+      fx = tf.signal.frame(x, frame_length=self.nfft,
+        frame_step=self.hlen, pad_end=True)
 
-    for i in range(int(np.log2(self.nfft))):
-      subdim = 2**(i+1)
-      rx = tf.reshape(rx, [tf.shape(rx)[0], -1, 1]) 
-      ix = tf.reshape(ix, [tf.shape(ix)[0], -1, 1]) 
+      rx, ix = self.tfft(fx, inverse=inverse)
+      return rx, ix
 
-      _rrx = self.conv(rx, self.rconvs[i], subdim)
-      _iix = self.conv(ix, self.iconvs[i], subdim)
-      _rix = self.conv(ix, self.rconvs[i], subdim)
-      _irx = self.conv(rx, self.iconvs[i], subdim)
+    else:
+      rx, ix = inputs
+      __x = self.tfft((rx, ix), inverse=inverse)
+      _x = tf.signal.overlap_and_add(__x, self.hlen)
 
-      rx = _rrx - _iix
-      ix = _rix + _irx
+      win_sq = tf.tile(self.tfft.window, [1, 1, tf.shape(rx)[1]])
+      win_sq = tf.reshape(win_sq, [1, tf.shape(rx)[1], -1])
+      win_sq = win_sq ** 2
+      win_sq = tf.signal.overlap_and_add(win_sq, self.hlen)
 
-    rx = rx / self.nfft
-    ix = ix / self.nfft
-
-    return tf.math.sqrt(rx**2 + ix**2)
+      # tf.math.maximum is used to prevent nan on back-prop
+      _x = tf.where(win_sq > 1e-10, _x / tf.math.maximum(win_sq, 1e-10), _x)
+      return _x
