@@ -14,67 +14,52 @@ model = tera_unet()
 import numpy as np
 pcm = np.zeros(16000)
 _in = np.reshape(pcm, [1, -1])
-_tmp = model((_in, _in))
+_tmp = model(_in)
 
-sys.exit()
+w = m['Transformer']['input_representations.spec_transform.weight'].cpu().numpy()
+b = m['Transformer']['input_representations.spec_transform.bias'].cpu().numpy()
+model.tera.fe.spec_transform.set_weights([w.transpose(1,0), b])
 
-def load_norm(prefix, e):
-  w = m['{}.weight'.format(prefix, i)].cpu().numpy()
-  b = m['{}.bias'.format(prefix, i)].cpu().numpy()
-  e.gamma.assign(w)
-  e.beta.assign(b)
+w = m['Transformer']['input_representations.LayerNorm.weight'].cpu().numpy()
+b = m['Transformer']['input_representations.LayerNorm.bias'].cpu().numpy()
+model.tera.fe.lnorm.gamma.assign(w)
+model.tera.fe.lnorm.beta.assign(b)
 
-def load_affine(prefix, e):
-  w = m['{}.weight'.format(prefix)]
-  bname = '{}.bias'.format(prefix)
-  if bname in m:
-    b = m[bname]
-    e.set_weights([w.transpose(1,0).cpu().numpy(), b.cpu().numpy()])
-  else:
-    e.set_weights([w.transpose(1,0).cpu().numpy()])
+for i in range(3):
+  prefix = 'encoder.layer.{}'.format(i)
+  w = m['Transformer'][prefix + '.attention.self.query.weight'].cpu().numpy()
+  b = m['Transformer'][prefix + '.attention.self.query.bias'].cpu().numpy()
+  model.tera.enc.layers[i].atten.self_attn.query.set_weights([w.transpose(1,0), b])
 
-def load_conv(prefix, e):
-  w = m['{}.weight'.format(prefix)]
-  bname = '{}.bias'.format(prefix)
-  if bname in m:
-    b = m[bname]
-    e.set_weights([w.transpose(2,0).cpu().numpy(), b.cpu().numpy()])
-  else:
-    e.set_weights([w.transpose(2,0).cpu().numpy()])
+  w = m['Transformer'][prefix + '.attention.self.key.weight'].cpu().numpy()
+  b = m['Transformer'][prefix + '.attention.self.key.bias'].cpu().numpy()
+  model.tera.enc.layers[i].atten.self_attn.key.set_weights([w.transpose(1,0), b])
 
-for i, conv in enumerate(model.wav2vec2.fe.conv_layers):
-  prefix = 'wav2vec2.feature_extractor.conv_layers'
-  load_conv('{}.{}.conv'.format(prefix, i), conv.conv)
-  if i == 0:
-    load_norm('{}.{}.layer_norm'.format(prefix, i), conv.norm)
+  w = m['Transformer'][prefix + '.attention.self.value.weight'].cpu().numpy()
+  b = m['Transformer'][prefix + '.attention.self.value.bias'].cpu().numpy()
+  model.tera.enc.layers[i].atten.self_attn.value.set_weights([w.transpose(1,0), b])
 
-'''
-prefix = 'wav2vec2.feature_projection'
-load_norm('{}.layer_norm'.format(prefix), model.wav2vec2.fp.norm)
-load_affine('{}.projection'.format(prefix), model.wav2vec2.fp.proj)
+  w = m['Transformer'][prefix + '.attention.output.dense.weight'].cpu().numpy()
+  b = m['Transformer'][prefix + '.attention.output.dense.bias'].cpu().numpy()
+  model.tera.enc.layers[i].atten.out.set_weights([w.transpose(1,0), b])
 
-prefix = 'wav2vec2.encoder'
-w_g = m['{}.pos_conv_embed.conv.weight_g'.format(prefix)].cpu().numpy()
-w_g = np.reshape(w_g, [-1, 1, 1])
-w_v = m['{}.pos_conv_embed.conv.weight_v'.format(prefix)].transpose(2,0).cpu().numpy()
-w = tf.nn.l2_normalize(w_v, axis=[1,2]) * w_g
-b = m['{}.pos_conv_embed.conv.bias'.format(prefix)].cpu().numpy()
-model.wav2vec2.enc.emb.conv.set_weights([w, b])
-load_norm('{}.layer_norm'.format(prefix), model.wav2vec2.enc.norm)
+  w = m['Transformer'][prefix + '.attention.output.LayerNorm.weight'].cpu().numpy()
+  b = m['Transformer'][prefix + '.attention.output.LayerNorm.bias'].cpu().numpy()
+  model.tera.enc.layers[i].atten.lnorm.gamma.assign(w)
+  model.tera.enc.layers[i].atten.lnorm.beta.assign(b)
 
-for i, layer in enumerate(model.wav2vec2.enc.layers):
-  prefix = 'wav2vec2.encoder.layers.{}'.format(i)
-  load_affine('{}.attention.q_proj'.format(prefix), layer.atten.q_proj)
-  load_affine('{}.attention.k_proj'.format(prefix), layer.atten.k_proj)
-  load_affine('{}.attention.v_proj'.format(prefix), layer.atten.v_proj)
-  load_affine('{}.attention.out_proj'.format(prefix), layer.atten.out_proj)
- 
-  load_affine('{}.feed_forward.intermediate_dense'.format(prefix), layer.feed.in_dense)
-  load_affine('{}.feed_forward.output_dense'.format(prefix), layer.feed.out_dense)
-  
-  load_norm('{}.layer_norm'.format(prefix), layer.norm)
-  load_norm('{}.final_layer_norm'.format(prefix), layer.out_norm)
-'''
+  w = m['Transformer'][prefix + '.intermediate.dense.weight'].cpu().numpy()
+  b = m['Transformer'][prefix + '.intermediate.dense.bias'].cpu().numpy()
+  model.tera.enc.layers[i].inter.set_weights([w.transpose(1,0), b])
+
+  w = m['Transformer'][prefix + '.output.dense.weight'].cpu().numpy()
+  b = m['Transformer'][prefix + '.output.dense.bias'].cpu().numpy()
+  model.tera.enc.layers[i].out.set_weights([w.transpose(1,0), b])
+
+  w = m['Transformer'][prefix + '.output.LayerNorm.weight'].cpu().numpy()
+  b = m['Transformer'][prefix + '.output.LayerNorm.bias'].cpu().numpy()
+  model.tera.enc.layers[i].lnorm.gamma.assign(w)
+  model.tera.enc.layers[i].lnorm.beta.assign(b)
 
 ckpt = tf.train.Checkpoint(model)
-ckpt.write("wav2vec2_sep_base_v2.ckpt")
+ckpt.write("tera_base.ckpt")
