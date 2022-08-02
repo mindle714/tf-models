@@ -82,28 +82,35 @@ def stft(
     pcm, frame_length=frame_length, frame_step=frame_step,
     fft_length=fft_length, window_fn=window_fn, pad_end=True)
 
-def mel_filterbank(
+import mel_ops
+
+def melspec(
   pcm, sr=16000,
-  frame_length=25, frame_step=10, fft_length=None,
+  frame_length=400, frame_step=160, fft_length=400,
   window_fn=functools.partial(tf.signal.hann_window, periodic=True),
   lower_edge_hertz=80.0, upper_edge_hertz=7600.0, num_mel_bins=24,
-  log_noise_floor=1e-3):
+  eps=1e-10, power=2.,
+  center=True, pad_mode='reflect', cmvn=True):
 
-  stfts = stft(
-      pcm, sr=sr,
+  if center:
+    pcm = tf.pad(pcm, tf.constant(
+      [[0, 0], [fft_length//2, fft_length//2]]), mode=pad_mode)
+
+  stfts = tf.signal.stft(
+      pcm,
       frame_length=frame_length,
       frame_step=frame_step,
       fft_length=fft_length,
-      window_fn=window_fn)
+      window_fn=window_fn, pad_end=False)
 
   # An energy spectrogram is the magnitude of the complex-valued STFT.
   # A float32 Tensor of shape [batch_size, ?, 257].
-  magnitude_spectrograms = tf.abs(stfts)
+  magnitude_spectrograms = tf.abs(stfts)**power
 
   # Warp the linear-scale, magnitude spectrograms into the mel-scale.
   num_spectrogram_bins = magnitude_spectrograms.shape[-1]
   linear_to_mel_weight_matrix = (
-      tf.signal.linear_to_mel_weight_matrix(
+      mel_ops.linear_to_mel_weight_matrix(
           num_mel_bins, num_spectrogram_bins, sr, lower_edge_hertz,
           upper_edge_hertz))
   mel_spectrograms = tf.tensordot(
@@ -112,8 +119,53 @@ def mel_filterbank(
   mel_spectrograms.set_shape(magnitude_spectrograms.shape[:-1].concatenate(
       linear_to_mel_weight_matrix.shape[-1:]))
 
-  log_mel_sgram = tf.math.log(tf.maximum(log_noise_floor, mel_spectrograms))
+  log_mel_sgram = tf.math.log(eps + mel_spectrograms)
+
+  if cmvn:
+    cmvn_sgram = (log_mel_sgram - tf.math.reduce_mean(log_mel_sgram, 1, keepdims=True))
+    std_cmvn = tf.math.reduce_variance(log_mel_sgram, 1, keepdims=True)
+    std_n = tf.cast(tf.shape(log_mel_sgram)[1], tf.float32)
+    std_cmvn = std_cmvn * std_n / (std_n-1)
+    std_cmvn = tf.math.sqrt(std_cmvn)
+    #cmvn_sgram /= (tf.math.reduce_std(log_mel_sgram, 1, keepdims=True) + eps)
+    cmvn_sgram /= (std_cmvn + eps)
+    log_mel_sgram = cmvn_sgram
+
   return log_mel_sgram
+
+def mfcc(
+  pcm, frame_length=400, frame_step=160, fft_length=400,
+  lower_edge_hertz=80.0, upper_edge_hertz=7600.0, num_mel_bins=80,
+  center=True, pad_mode='reflect'):
+
+  if center:
+    pcm = tf.pad(pcm, tf.constant(
+      [[0, 0], [fft_length//2, fft_length//2]]), mode=pad_mode)
+
+  stfts = tf.signal.stft(
+    pcm, frame_length=frame_length,
+    frame_step=frame_step, fft_length=fft_length)
+
+  spectrograms = tf.abs(stfts)
+
+  # Warp the linear scale spectrograms into the mel-scale.
+  num_spectrogram_bins = stfts.shape[-1].value
+  linear_to_mel_weight_matrix = tf.signal.linear_to_mel_weight_matrix(
+    num_mel_bins, num_spectrogram_bins, sample_rate, lower_edge_hertz,
+    upper_edge_hertz)
+  mel_spectrograms = tf.tensordot(
+    spectrograms, linear_to_mel_weight_matrix, 1)
+  mel_spectrograms.set_shape(spectrograms.shape[:-1].concatenate(
+    linear_to_mel_weight_matrix.shape[-1:]))
+
+  # Compute a stabilized log to get log-magnitude mel-scale spectrograms.
+  log_mel_spectrograms = tf.math.log(mel_spectrograms + 1e-6)
+
+  # Compute MFCCs from log_mel_spectrograms and take the first 13.
+  mfccs = tf.signal.mfccs_from_log_mel_spectrograms(
+    log_mel_spectrograms)[..., :13]
+
+  return mfccs
 
 class conv1d(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
@@ -276,15 +328,15 @@ class cnorm(tf.keras.layers.Layer):
     return self.gamma * (x-m) / tf.math.sqrt(v + self.eps) + self.beta
 
 class lnorm(gnorm):
-  def __init__(self, affine=True, *args, **kwargs):
+  def __init__(self, affine=True, eps=1e-5, *args, **kwargs):
     self.affine = affine
+    self.eps = eps
     super(lnorm, self).__init__(*args, **kwargs)
 
   def build(self, input_shape):
     if isinstance(input_shape, tuple): dim = input_shape[0][-1]
     else: dim = input_shape[-1]
 
-    self.eps = 1e-5
     if self.affine:
       self.gamma = self.add_weight(shape=(dim),
         initializer="ones", name="gamma")
