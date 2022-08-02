@@ -14,7 +14,7 @@ model = tera_unet()
 import numpy as np
 pcm = np.zeros(16000)
 _in = np.reshape(pcm, [1, -1])
-_tmp = model(_in)
+_tmp = model((_in, None))
 
 w = m['Transformer']['input_representations.spec_transform.weight'].cpu().numpy()
 b = m['Transformer']['input_representations.spec_transform.bias'].cpu().numpy()

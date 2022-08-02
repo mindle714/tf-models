@@ -1,8 +1,19 @@
 import tensorflow as tf
 from util import *
+from spec_ops import *
 
 tf_sum = tf.math.reduce_sum
 tf_expd = tf.expand_dims
+
+def gelu(features, approximate=False, name=None):
+  if approximate:
+    coeff = tf.cast(0.044715, features.dtype)
+    return 0.5 * features * (
+          1.0 + tf.math.tanh(0.7978845608028654 *
+                              (features + coeff * tf.math.pow(features, 3))))
+  else:
+    return 0.5 * features * (1.0 + tf.math.erf(
+          features / tf.cast(1.4142135623730951, features.dtype)))
 
 def _normalize_wav_decibel(wav, target_level=-25):
   rms = (tf.math.reduce_mean(wav**2))**0.5
@@ -114,7 +125,7 @@ class enclayer(tf.keras.layers.Layer):
     x, attn_mask = inputs
 
     x = self.atten((x, attn_mask))
-    _x = tf.keras.activations.gelu(self.inter(x))
+    _x = gelu(self.inter(x))
 
     x = self.out(_x) + x
     x = self.lnorm(x)
@@ -166,8 +177,6 @@ class tera_seq(tf.keras.layers.Layer):
 
   def build(self, input_shape):
     self.tera = tera()
-    self.projector = tf.keras.layers.Dense(256, use_bias=True)
-    self.classifier = tf.keras.layers.Dense(12, use_bias=True)
   
   def call(self, inputs, training=None):
     x = inputs
@@ -184,10 +193,10 @@ class tera_unet(tf.keras.layers.Layer):
 
   def build(self, input_shape):
     conv_opt = dict(padding='same', use_bias=False)
-    self.ref_len = input_shape[0][1]
 
     self.tera = tera()
 
+    '''
     self.conv_mid = conv1d(self.dims[-1], self.ksize, **conv_opt)
 
     self.enc_convs = [tf.keras.layers.Dense(64) for _ in range(self.layer)]
@@ -199,43 +208,36 @@ class tera_unet(tf.keras.layers.Layer):
         strides=1, **conv_opt) for _ in range(self.sublayer)] for idx in range(self.layer)]))
 
     self.conv_post = conv1d(1, self.ksize, **conv_opt)
+    '''
+    self.convs = [conv1d(768, 3, **conv_opt) for _ in range(3)]
+    self.conv_mag = conv1d(201, 3, **conv_opt)
+    self.conv_uph = conv1d(201, 3, **conv_opt)
   
   def call(self, inputs, training=None):
     x, ref = inputs
 
-    x = tf_expd(x, -1)
-    x, fes = self.tera(x)
-    x = tf.keras.activations.gelu(x)
+    xs = self.tera(x)
+    x = xs[-1]
+
+    x = gelu(x)
     #x = tf.stop_gradient(x)
 
-    x = self.conv_mid(x)
-   
-    idx = 0; fes = fes[::-1]
-    for _enc, (up_conv, convs) in zip(fes, self.up_convs):
-      x = tf.keras.activations.gelu(up_conv(x))
-      
-      enc = self.enc_convs[idx](_enc)
+    for conv in self.convs:
+      x = gelu(conv(x))
 
-      pad = tf.shape(enc)[1] - tf.shape(x)[1]
-      lpad = pad // 2
-      rpad = pad - lpad
-      x = tf.concat([
-        tf.zeros_like(x)[:,:lpad,:],
-        x,
-        tf.zeros_like(x)[:,:rpad,:]], 1)
-      x = tf.concat([x, enc], -1)
+    x_mag = self.conv_mag(x)
+    x_uph = self.conv_uph(x)
+    x_ph = tf.math.floormod(x_uph, 2.0 * np.pi)
 
-      for conv in convs:
-        x = tf.keras.activations.gelu(conv(x)) + x
-      idx += 1
-    
-    x = self.conv_post(x)
-    x = tf.math.tanh(x)
-    x = tf.squeeze(x, -1)
+    x_f = tf.complex(x_mag, 0.) * tf.complex(tf.math.cos(x_ph), tf.math.sin(x_ph))
+    x = tf.signal.inverse_stft(x_f,
+      frame_length=400, frame_step=160, fft_length=400)
 
     if ref is not None:
+      x = x[..., :tf.shape(ref)[-1]]
       samp_loss = tf.math.reduce_mean((x - ref) ** 2)
 
+      '''
       def stft_loss(x, ref, frame_length, frame_step, fft_length):
         stft_opt = dict(frame_length=frame_length,
           frame_step=frame_step, fft_length=fft_length)
@@ -256,5 +258,20 @@ class tera_unet(tf.keras.layers.Layer):
       spec_loss += stft_loss(x, ref, 10, 2, 512)
 
       return samp_loss + spec_loss
+      '''
+
+      # center padding
+      ref = tf.pad(ref, tf.constant(
+        [[0, 0], [200, 200]]), mode='reflect')
+
+      f_ref = tf.signal.stft(ref, 
+        frame_length=400, frame_step=160, fft_length=400)
+      mag_ref = tf.math.abs(f_ref)
+      uph_ref = unwrap(tf.math.angle(f_ref))
+
+      comp_loss = tf.reduce_mean(tf.math.abs(mag_ref - x_mag))
+      comp_loss += tf.reduce_mean(tf.math.abs(uph_ref - x_uph))
+
+      return samp_loss + comp_loss
 
     return x
