@@ -1,0 +1,12 @@
+#!/usr/bin/bash
+
+printf "%25s(%5s) %20s\n" "EXP" "SIZE" "EPOCH"
+for exp in exps/*/; do
+  sz="UNK"
+  if [ -f "$exp/model-1000.ckpt.data-00000-of-00001" ]; then
+    sz="$(du -h $exp/model-1000.ckpt.data-00000-of-00001 | awk '{print $1}')"
+  fi
+  last="$(grep gstep $exp/train.log | tail -n1)"
+  exp2="$(echo $exp | sed 's#exps/##g' | sed 's#/$##g')"
+  printf "%25s(%5s) %20s\n" "$exp2" "$sz" "$last"
+done

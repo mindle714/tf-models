@@ -60,6 +60,12 @@ elif expname.startswith("data2vec"):
     sys.exit("data2vec is loaded from {}".format(data2vec.__file__))
   m = data2vec.data2vec_unet()
 
+elif expname.startswith("tera"):
+  import tera
+  if os.path.dirname(tera.__file__) != expdir:
+    sys.exit("tera is loaded from {}".format(tera.__file__))
+  m = tera.tera_unet()
+
 elif expname.startswith("tffts"):
   import tffts
   if os.path.dirname(tffts.__file__) != expdir:
