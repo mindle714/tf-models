@@ -197,6 +197,8 @@ class tera_unet(tf.keras.layers.Layer):
     self.strides = [5, 2, 2, 2, 2, 2, 2]
     self.ksize = 16
     self.sublayer = 4
+    self.k = 10
+    self.c = 0.1
 
   def build(self, input_shape):
     conv_opt = dict(padding='same', use_bias=False)
@@ -217,11 +219,12 @@ class tera_unet(tf.keras.layers.Layer):
     self.conv_post = conv1d(1, self.ksize, **conv_opt)
     '''
     self.convs = [conv1d(768, 3, **conv_opt) for _ in range(3)]
-    self.conv_mag = conv1d(201, 3, **conv_opt)
-    self.conv_uph = conv1d(201, 3, **conv_opt)
+    self.conv_r = conv1d(201, 3, **conv_opt)
+    self.conv_i = conv1d(201, 3, **conv_opt)
   
   def call(self, inputs, training=None):
     x, ref = inputs
+    _in = x
 
     xs = self.tera(x)
     x = xs[-1]
@@ -232,20 +235,52 @@ class tera_unet(tf.keras.layers.Layer):
     for conv in self.convs:
       x = gelu(conv(x))
 
-    x_mag = self.conv_mag(x)
-    x_uph = self.conv_uph(x)
-    x_ph = tf.math.floormod(x_uph, 2.0 * np.pi)
+    x_r = tf.clip_by_value(self.conv_r(x), -self.k, self.k)
+    x_i = tf.clip_by_value(self.conv_i(x), -self.k, self.k)
+      
+    in_pad = tf.pad(_in, tf.constant(
+      [[0, 0], [200, 200]]), mode='reflect')
 
-    x_f = tf.complex(x_mag, 0.) * tf.complex(tf.math.cos(x_ph), tf.math.sin(x_ph))
-    x = tf.signal.inverse_stft(x_f,
+    Y = tf.signal.stft(in_pad, frame_length=400, frame_step=160, fft_length=400)
+    Yr = tf.math.real(Y); Yi = tf.math.imag(Y)
+
+    Mr = -1. / self.c * tf.math.log(tf.nn.relu((self.k - x_r) / (self.k + x_r)) + 1e-10)
+    Mi = -1. / self.c * tf.math.log(tf.nn.relu((self.k - x_i) / (self.k + x_i)) + 1e-10)
+
+    Sr = tf.linalg.matmul(Mr, Yr) - tf.linalg.matmul(Mi, Yi)
+    Si = tf.linalg.matmul(Mr, Yi) + tf.linalg.matmul(Mi, Yr)
+    x = tf.signal.inverse_stft(tf.complex(Sr, Si),
       frame_length=400, frame_step=160, fft_length=400)
     x = x[..., 200:]
+      
+    def get_cirm(Yr, Yi, ref):
+      ref_pad = tf.pad(ref, tf.constant(
+        [[0, 0], [200, 200]]), mode='reflect')
+
+      S = tf.signal.stft(ref_pad, frame_length=400, frame_step=160, fft_length=400)
+      Sr = tf.math.real(S); Si = tf.math.imag(S)
+
+      M_denom = (Yr * Yr) + (Yi * Yi)
+      Mr_num = (Yr * Sr) + (Yi * Si)
+      Mr = Mr_num / (M_denom + 1e-10)
+
+      Mi_num = (Yr * Si) - (Yi * Sr)
+      Mi = Mi_num / (M_denom + 1e-10)
+
+      Cr_exp = tf.math.exp(-self.c * Mr)
+      #Cr = self.k * ((1 - Cr_exp) / (1 + Cr_exp))
+      Cr = self.k * (-1. + 2. * tf.math.reciprocal_no_nan(1 + Cr_exp))
+        
+      Ci_exp = tf.math.exp(-self.c * Mi)
+      #Ci = self.k * ((1 - Ci_exp) / (1 + Ci_exp))
+      Ci = self.k * (-1. + 2. * tf.math.reciprocal_no_nan(1 + Ci_exp))
+
+      return Cr, Ci
 
     if ref is not None:
       x = x[..., :tf.shape(ref)[-1]]
       samp_loss = tf.math.reduce_mean((x - ref) ** 2)
 
-      '''
       def stft_loss(x, ref, frame_length, frame_step, fft_length):
         stft_opt = dict(frame_length=frame_length,
           frame_step=frame_step, fft_length=fft_length)
@@ -265,21 +300,10 @@ class tera_unet(tf.keras.layers.Layer):
       spec_loss += stft_loss(x, ref, 50, 10, 2048)
       spec_loss += stft_loss(x, ref, 10, 2, 512)
 
-      return samp_loss + spec_loss
-      '''
+      Cr, Ci = get_cirm(Yr, Yi, ref)
+      cirm_loss = tf.math.reduce_mean(tf.math.abs(Cr - x_r))
+      cirm_loss += tf.math.reduce_mean(tf.math.abs(Ci - x_i))
 
-      # center padding
-      ref = tf.pad(ref, tf.constant(
-        [[0, 0], [200, 200]]), mode='reflect')
-
-      f_ref = tf.signal.stft(ref, 
-        frame_length=400, frame_step=160, fft_length=400)
-      mag_ref = tf.math.abs(f_ref)
-      uph_ref = unwrap(tf.math.angle(f_ref))
-
-      comp_loss = tf.reduce_mean(tf.math.abs(mag_ref - x_mag))
-      comp_loss += tf.reduce_mean(tf.math.abs(uph_ref - x_uph))
-
-      return samp_loss + comp_loss
+      return samp_loss + spec_loss, cirm_loss
 
     return x
