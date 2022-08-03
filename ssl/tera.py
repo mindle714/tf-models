@@ -192,65 +192,6 @@ class tera_seq(tf.keras.layers.Layer):
     x = inputs
     return self.tera(x)
 
-class base_unet(tf.keras.layers.Layer):
-  def __init__(self, *args, **kwargs):
-    super(base_unet, self).__init__(*args, **kwargs)
-    self.layer = 4
-    self.dims = [32, 32, 32, 32]
-    self.ksize = 16
-    self.sublayer = 4
-
-  def build(self, input_shape):
-    conv_opt = dict(padding='same')
-
-    self.conv_pre = conv1d(self.dims[0], self.ksize, **conv_opt)
-    self.conv_post = conv1d(1, self.ksize, **conv_opt)
-
-    self.down_convs = list(zip(
-      [conv1d(self.dims[idx], 3,
-        strides=2, **conv_opt) for idx in range(self.layer)],
-      [[conv1d(None, self.ksize,
-        strides=1, **conv_opt) for _ in range(self.sublayer)] for idx in range(self.layer)]))
-
-    self.up_convs = list(zip(
-      [conv1dtrans(self.dims[::-1][idx], 3,
-        strides=2, **conv_opt) for idx in range(self.layer)],
-      [[conv1d(None, self.ksize,
-        strides=1, **conv_opt) for _ in range(self.sublayer)] for idx in range(self.layer)]))
-
-    self.conv_mid = conv1d(self.dims[-1], self.ksize, **conv_opt)
-
-  def call(self, inputs, training=None):
-    x = inputs
-
-    x = tf_expd(x, -1)
-    x = self.conv_pre(x)
-    x = tf.nn.relu(x)
-
-    encs = []
-    for down_conv, convs in self.down_convs:
-      for conv in convs:
-        x = tf.nn.relu(conv(x)) + x
-      encs.append(x)
-
-      x = down_conv(x)
-      x = tf.nn.relu(x)
-
-    x = self.conv_mid(x)
-
-    encs = encs[::-1]
-    for enc, (up_conv, convs) in zip(encs, self.up_convs):
-      x = tf.nn.relu(up_conv(x))
-      x = tf.concat([x, enc], -1)
-      for conv in convs:
-        x = tf.nn.relu(conv(x)) + x
-    
-    x = self.conv_post(x)
-    x = tf.math.tanh(x)
-    x = tf.squeeze(x, -1)
-    
-    return x
-
 class tera_unet(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
     super(tera_unet, self).__init__()
@@ -270,7 +211,6 @@ class tera_unet(tf.keras.layers.Layer):
     conv_opt = dict(padding='same', use_bias=False)
 
     self.tera = tera(self.n_fft, self.hop_len)
-    #self.base_unet = base_unet()
 
     self.conv_r = conv1d(self.n_fft//2+1, 3, **conv_opt)
     self.conv_i = conv1d(self.n_fft//2+1, 3, **conv_opt)
@@ -279,16 +219,11 @@ class tera_unet(tf.keras.layers.Layer):
     x, ref = inputs
     _in = x
 
-    #unet_x = self.base_unet(x)
-
     xs = self.tera(x)
     x = xs[-1]
 
     x = gelu(x)
     #x = tf.stop_gradient(x)
-
-    #for conv in self.convs:
-    #  x = gelu(conv(x)) + x
 
     x_r = tf.clip_by_value(self.conv_r(x), -self.k, self.k)
     x_i = tf.clip_by_value(self.conv_i(x), -self.k, self.k)
@@ -309,9 +244,6 @@ class tera_unet(tf.keras.layers.Layer):
       frame_length=self.n_fft, frame_step=self.hop_len, fft_length=self.n_fft)
     x = x[..., self.n_fft//2:self.n_fft//2+tf.shape(_in)[1]]
 
-    #x = x + unet_x
-    #x = unet_x
-      
     def get_cirm(Yr, Yi, ref):
       ref_pad = tf.pad(ref, tf.constant(
         [[0, 0], [self.n_fft//2, self.n_fft//2]]), mode='reflect')
