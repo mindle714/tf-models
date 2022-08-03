@@ -157,9 +157,9 @@ class encoder(tf.keras.layers.Layer):
 
     return encs
 
-class mockingjay(tf.keras.layers.Layer):
+class tera(tf.keras.layers.Layer):
   def __init__(self, n_fft, hop_len, *args, **kwargs):
-    super(mockingjay, self).__init__()
+    super(tera, self).__init__()
     self.n_fft = n_fft
     self.hop_len = hop_len
 
@@ -181,20 +181,20 @@ class mockingjay(tf.keras.layers.Layer):
 
     return x
 
-class mockingjay_seq(tf.keras.layers.Layer):
+class tera_seq(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
-    super(mockingjay_seq, self).__init__()
+    super(tera_seq, self).__init__()
 
   def build(self, input_shape):
-    self.mockingjay = mockingjay(400, 160)
+    self.tera = tera(400, 160)
   
   def call(self, inputs, training=None):
     x = inputs
-    return self.mockingjay(x)
+    return self.tera(x)
 
-class mockingjay_unet(tf.keras.layers.Layer):
+class tera_unet(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
-    super(mockingjay_unet, self).__init__()
+    super(tera_unet, self).__init__()
 
     self.layer = 4
     self.dims = [32, 32, 32, 32]
@@ -210,39 +210,56 @@ class mockingjay_unet(tf.keras.layers.Layer):
   def build(self, input_shape):
     conv_opt = dict(padding='same', use_bias=False)
 
-    self.mockingjay = mockingjay(self.n_fft, self.hop_len)
+    self.tera = tera(self.n_fft, self.hop_len)
 
-    self.conv_r = conv1d(self.n_fft//2+1, 3, **conv_opt)
-    self.conv_i = conv1d(self.n_fft//2+1, 3, **conv_opt)
+    self.conv_r_s1 = conv1d(self.n_fft//2+1, 3, **conv_opt)
+    self.conv_i_s1 = conv1d(self.n_fft//2+1, 3, **conv_opt)
+    self.conv_r_s2 = conv1d(self.n_fft//2+1, 3, **conv_opt)
+    self.conv_i_s2 = conv1d(self.n_fft//2+1, 3, **conv_opt)
   
   def call(self, inputs, training=None):
-    x, ref = inputs
+    sm = None
+
+    if isinstance(inputs, tuple):
+      s1, s2, x = inputs
+      sm = tf.concat([tf_expd(s1, -1), tf_expd(s2, -1)], -1)
+
+    else:
+      x = inputs
+
     _in = x
 
-    xs = self.mockingjay(x)
+    xs = self.tera(x)
     x = xs[-1]
 
     x = gelu(x)
     #x = tf.stop_gradient(x)
 
-    x_r = tf.clip_by_value(self.conv_r(x), -self.k, self.k)
-    x_i = tf.clip_by_value(self.conv_i(x), -self.k, self.k)
+    def get_hyp(x, conv_r, conv_i):
+      x_r = tf.clip_by_value(conv_r(x), -self.k, self.k)
+      x_i = tf.clip_by_value(conv_i(x), -self.k, self.k)
       
-    in_pad = tf.pad(_in, tf.constant(
-      [[0, 0], [self.n_fft//2, self.n_fft//2]]), mode='reflect')
+      in_pad = tf.pad(_in, tf.constant(
+        [[0, 0], [self.n_fft//2, self.n_fft//2]]), mode='reflect')
 
-    Y = tf.signal.stft(in_pad, 
-      frame_length=self.n_fft, frame_step=self.hop_len, fft_length=self.n_fft)
-    Yr = tf.math.real(Y); Yi = tf.math.imag(Y)
+      Y = tf.signal.stft(in_pad, 
+        frame_length=self.n_fft, frame_step=self.hop_len, fft_length=self.n_fft)
+      Yr = tf.math.real(Y); Yi = tf.math.imag(Y)
 
-    Mr = -1. / self.c * tf.math.log(tf.nn.relu((self.k - x_r) / (self.k + x_r)) + 1e-10)
-    Mi = -1. / self.c * tf.math.log(tf.nn.relu((self.k - x_i) / (self.k + x_i)) + 1e-10)
+      Mr = -1. / self.c * tf.math.log(tf.nn.relu((self.k - x_r) / (self.k + x_r)) + 1e-10)
+      Mi = -1. / self.c * tf.math.log(tf.nn.relu((self.k - x_i) / (self.k + x_i)) + 1e-10)
 
-    Sr = (Mr * Yr) - (Mi * Yi)
-    Si = (Mr * Yi) + (Mi * Yr)
-    x = tf.signal.inverse_stft(tf.complex(Sr, Si),
-      frame_length=self.n_fft, frame_step=self.hop_len, fft_length=self.n_fft)
-    x = x[..., self.n_fft//2:self.n_fft//2+tf.shape(_in)[1]]
+      Sr = (Mr * Yr) - (Mi * Yi)
+      Si = (Mr * Yi) + (Mi * Yr)
+      x = tf.signal.inverse_stft(tf.complex(Sr, Si),
+        frame_length=self.n_fft, frame_step=self.hop_len, fft_length=self.n_fft)
+      x = x[..., self.n_fft//2:self.n_fft//2+tf.shape(_in)[1]]
+
+      return x, Yr, Yi, x_r, x_i
+
+    x_s1, Yr_s1, Yi_s1, x_r_s1, x_i_s1 = get_hyp(x, self.conv_r_s1, self.conv_i_s1)
+    x_s2, Yr_s2, Yi_s2, x_r_s2, x_i_s2 = get_hyp(x, self.conv_r_s2, self.conv_i_s2)
+    x = tf.concat([tf_expd(x_s1, -1), tf_expd(x_s2, -1)], -1) 
 
     def get_cirm(Yr, Yi, ref):
       ref_pad = tf.pad(ref, tf.constant(
@@ -269,33 +286,19 @@ class mockingjay_unet(tf.keras.layers.Layer):
 
       return Cr, Ci
 
-    if ref is not None:
-      x = x[..., :tf.shape(ref)[-1]]
-      samp_loss = tf.math.reduce_mean((x - ref) ** 2)
+    if sm is not None:
+      x = x[..., :tf.shape(sm)[1], :]
+      snr, sort_x, sort_sm = si_snr(sm, x, return_ref=True)
+      loss = -tf.math.reduce_mean(snr)
 
-      def stft_loss(x, ref, frame_length, frame_step, fft_length):
-        stft_opt = dict(frame_length=frame_length,
-          frame_step=frame_step, fft_length=fft_length)
-        mag_x = tf.math.abs(stft(x, **stft_opt))
-        mag_ref = tf.math.abs(stft(ref, **stft_opt))
+      Cr_s1, Ci_s1 = get_cirm(Yr_s1, Yi_s1, sort_sm[..., 0]) 
+      Cr_s2, Ci_s2 = get_cirm(Yr_s2, Yi_s2, sort_sm[..., 1]) 
 
-        fro_opt = dict(axis=(-2, -1), ord='fro')
-        sc_loss = tf.norm(mag_x - mag_ref, **fro_opt) / (tf.norm(mag_x, **fro_opt) + 1e-9)
-        sc_loss = tf.reduce_mean(sc_loss)
+      cirm_loss = tf.math.reduce_mean(tf.math.abs(Cr_s1 - x_r_s1))
+      cirm_loss += tf.math.reduce_mean(tf.math.abs(Ci_s1 - x_i_s1))
+      cirm_loss += tf.math.reduce_mean(tf.math.abs(Cr_s2 - x_r_s2))
+      cirm_loss += tf.math.reduce_mean(tf.math.abs(Ci_s2 - x_i_s2))
 
-        mag_loss = tf.math.log(mag_x + 1e-9) - tf.math.log(mag_ref + 1e-9)
-        mag_loss = tf.reduce_mean(tf.math.abs(mag_loss))
-
-        return sc_loss + mag_loss
-
-      spec_loss = stft_loss(x, ref, 25, 5, 1024)
-      spec_loss += stft_loss(x, ref, 50, 10, 2048)
-      spec_loss += stft_loss(x, ref, 10, 2, 512)
-
-      Cr, Ci = get_cirm(Yr, Yi, ref)
-      cirm_loss = tf.math.reduce_mean(tf.math.abs(Cr - x_r))
-      cirm_loss += tf.math.reduce_mean(tf.math.abs(Ci - x_i))
-
-      return samp_loss + spec_loss, cirm_loss
+      return loss, cirm_loss
 
     return x

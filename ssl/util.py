@@ -13,7 +13,7 @@ def log10(x):
 import itertools
 
 # ref[batch, timestep, mixture], hyp[..]
-def si_snr(ref, hyp, mask=None, pit=True, eps=1e-8):
+def si_snr(ref, hyp, mask=None, pit=True, eps=1e-8, return_ref=False):
   def norm_mean(e):
     if mask is not None:
       m, _ = tf.nn.weighted_moments(e, [1], mask, keepdims=True)
@@ -22,6 +22,7 @@ def si_snr(ref, hyp, mask=None, pit=True, eps=1e-8):
 
     return e - m
 
+  _ref = ref
   ref = norm_mean(ref)
   hyp = norm_mean(hyp)
 
@@ -64,7 +65,10 @@ def si_snr(ref, hyp, mask=None, pit=True, eps=1e-8):
     max_perm = tf.gather(perms, perm_id)
     sort_hyp = tf.linalg.matmul(tf.squeeze(hyp, -1), max_perm)
 
-    return max_snr, sort_hyp
+    if not return_ref:
+      return max_snr, sort_hyp
+    else:
+      return max_snr, sort_hyp, tf.linalg.matmul(_ref, max_perm)
 
   return snr, hyp
 
