@@ -21,6 +21,7 @@ def _normalize_wav_decibel(wav, target_level=-25):
   wav = wav * scalar
   return wav
 
+'''
 def get_sinusoid_table(hidden_size):
   def _cal_angle(position, hid_idx):
     return position / np.power(10000, 2 * (hid_idx // 2) / hidden_size)
@@ -30,6 +31,7 @@ def get_sinusoid_table(hidden_size):
   sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2])  # dim 2i
   sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2])  # dim 2i+1
   return sinusoid_table
+'''
 
 class inputrep(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
@@ -37,16 +39,43 @@ class inputrep(tf.keras.layers.Layer):
     super(inputrep, self).__init__()
 
   def build(self, input_shape):
-    self.seq_len = input_shape[1]
-    self.pos_enc = get_sinusoid_table(self.hidden_size)[:self.seq_len]
-    self.pos_enc = tf_expd(tf.cast(self.pos_enc, tf.float32), 0)
+    #self.seq_len = input_shape[1]
+    #self.pos_enc = get_sinusoid_table(self.hidden_size)[:self.seq_len]
+    #self.pos_enc = tf_expd(tf.cast(self.pos_enc, tf.float32), 0)
 
     self.spec_transform = tf.keras.layers.Dense(768, use_bias=True)
     self.lnorm = lnorm(affine=True, eps=1e-12)
+
+  def get_sinusoid_table(self, seq_len, hidden_size):
+    '''
+    def _get_posi_angle_vec(pos_i):
+      return [pos_i / np.power(10000, 2 * (hid_j // 2) / hidden_size) for hid_j in range(hidden_size)]
+    sinusoid_table = np.array([_get_posi_angle_vec(pos_i) for pos_i in range(seq_len)])
+    sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2])  # dim 2i
+    sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2])  # dim 2i+1
+    '''
+    #mod_seq_len = (seq_len // 2 + 1) * 2
+    X, Y = tf.meshgrid(tf.range(hidden_size), tf.range(seq_len))
+    sinusoid_table = tf.cast(Y, tf.float64) / tf.math.pow(10000, 2 * (X // 2) / hidden_size)
+    sinusoid_table = tf.cast(sinusoid_table, tf.float32)
+    #sinusoid_table[:, 0::2] = tf.math.sin(sinusoid_table[:, 0::2])  # dim 2i
+    #sinusoid_table[:, 1::2] = tf.math.cos(sinusoid_table[:, 1::2])  # dim 2i+1
+    
+    _x = tf.reshape(tf.transpose(sinusoid_table, [1,0]), [-1, 2, seq_len])
+    sinusoid_table = tf.concat([
+      tf.math.sin(_x[:,0,:]), tf.math.cos(_x[:,1,:])
+    ], 1)
+    sinusoid_table = tf.transpose(tf.reshape(sinusoid_table, [-1, seq_len]), [1,0])
+    sinusoid_table = sinusoid_table[:seq_len, :]
+
+    return sinusoid_table
   
   def call(self, inputs, training=None):
     x = inputs
-    x = self.spec_transform(x) + self.pos_enc
+
+    pos_enc = self.get_sinusoid_table(tf.shape(x)[1], self.hidden_size) 
+
+    x = self.spec_transform(x) + pos_enc
     x = self.lnorm(x)
     return x
 
