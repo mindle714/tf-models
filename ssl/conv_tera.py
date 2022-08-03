@@ -61,5 +61,5 @@ for i in range(3):
   model.tera.enc.layers[i].lnorm.gamma.assign(w)
   model.tera.enc.layers[i].lnorm.beta.assign(b)
 
-ckpt = tf.train.Checkpoint(model)
+ckpt = tf.train.Checkpoint(root=model)
 ckpt.write("tera_base.ckpt")
