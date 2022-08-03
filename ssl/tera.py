@@ -21,18 +21,6 @@ def _normalize_wav_decibel(wav, target_level=-25):
   wav = wav * scalar
   return wav
 
-'''
-def get_sinusoid_table(hidden_size):
-  def _cal_angle(position, hid_idx):
-    return position / np.power(10000, 2 * (hid_idx // 2) / hidden_size)
-  def _get_posi_angle_vec(position):
-    return [_cal_angle(position, hid_j) for hid_j in range(hidden_size)]
-  sinusoid_table = np.array([_get_posi_angle_vec(pos_i) for pos_i in range(32000)])
-  sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2])  # dim 2i
-  sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2])  # dim 2i+1
-  return sinusoid_table
-'''
-
 class inputrep(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
     self.hidden_size = 768
@@ -47,19 +35,9 @@ class inputrep(tf.keras.layers.Layer):
     self.lnorm = lnorm(affine=True, eps=1e-12)
 
   def get_sinusoid_table(self, seq_len, hidden_size):
-    '''
-    def _get_posi_angle_vec(pos_i):
-      return [pos_i / np.power(10000, 2 * (hid_j // 2) / hidden_size) for hid_j in range(hidden_size)]
-    sinusoid_table = np.array([_get_posi_angle_vec(pos_i) for pos_i in range(seq_len)])
-    sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2])  # dim 2i
-    sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2])  # dim 2i+1
-    '''
-    #mod_seq_len = (seq_len // 2 + 1) * 2
     X, Y = tf.meshgrid(tf.range(hidden_size), tf.range(seq_len))
-    sinusoid_table = tf.cast(Y, tf.float64) / tf.math.pow(10000, 2 * (X // 2) / hidden_size)
+    sinusoid_table = tf.cast(Y, tf.float64) / tf.math.pow(tf.cast(10000., tf.float64), 2 * (X // 2) / hidden_size)
     sinusoid_table = tf.cast(sinusoid_table, tf.float32)
-    #sinusoid_table[:, 0::2] = tf.math.sin(sinusoid_table[:, 0::2])  # dim 2i
-    #sinusoid_table[:, 1::2] = tf.math.cos(sinusoid_table[:, 1::2])  # dim 2i+1
     
     _x = tf.reshape(tf.transpose(sinusoid_table, [1,0]), [-1, 2, seq_len])
     sinusoid_table = tf.concat([
@@ -261,6 +239,7 @@ class tera_unet(tf.keras.layers.Layer):
     x_f = tf.complex(x_mag, 0.) * tf.complex(tf.math.cos(x_ph), tf.math.sin(x_ph))
     x = tf.signal.inverse_stft(x_f,
       frame_length=400, frame_step=160, fft_length=400)
+    x = x[..., 200:]
 
     if ref is not None:
       x = x[..., :tf.shape(ref)[-1]]
