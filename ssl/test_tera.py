@@ -64,6 +64,7 @@ for i in range(3):
   model.tera.enc.layers[i].lnorm.beta.assign(b)
 
 _out = model(_in)
+print(_out)
 sys.exit()
 
 for i, conv in enumerate(model.tera.fe.conv_layers):

@@ -5,16 +5,6 @@ from spec_ops import *
 tf_sum = tf.math.reduce_sum
 tf_expd = tf.expand_dims
 
-def gelu(features, approximate=False, name=None):
-  if approximate:
-    coeff = tf.cast(0.044715, features.dtype)
-    return 0.5 * features * (
-          1.0 + tf.math.tanh(0.7978845608028654 *
-                              (features + coeff * tf.math.pow(features, 3))))
-  else:
-    return 0.5 * features * (1.0 + tf.math.erf(
-          features / tf.cast(1.4142135623730951, features.dtype)))
-
 def _normalize_wav_decibel(wav, target_level=-25):
   rms = (tf.math.reduce_mean(wav**2))**0.5
   scalar = (10 ** (target_level / 20)) / (rms + 1e-10)
@@ -132,7 +122,7 @@ class enclayer(tf.keras.layers.Layer):
     x, attn_mask = inputs
 
     x = self.atten((x, attn_mask))
-    _x = gelu(self.inter(x))
+    _x = tf.keras.activations.gelu(self.inter(x))
 
     x = self.out(_x) + x
     x = self.lnorm(x)
@@ -216,14 +206,20 @@ class mockingjay_unet(tf.keras.layers.Layer):
     self.conv_i = conv1d(self.n_fft//2+1, 3, **conv_opt)
   
   def call(self, inputs, training=None):
-    x, ref = inputs
+    if isinstance(inputs, tuple):
+      x, ref = inputs
+
+    else:
+      x = inputs
+      ref = None
+
     _in = x
 
     xs = self.mockingjay(x)
     x = xs[-1]
 
-    x = gelu(x)
-    #x = tf.stop_gradient(x)
+    x = tf.keras.activations.gelu(x)
+    x = tf.stop_gradient(x)
 
     x_r = tf.clip_by_value(self.conv_r(x), -self.k, self.k)
     x_i = tf.clip_by_value(self.conv_i(x), -self.k, self.k)

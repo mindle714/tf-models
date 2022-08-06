@@ -1,13 +1,14 @@
 import tensorflow as tf
+from mockingjay import *
+assert 'compat' not in tf.__file__
 
 import torch
 # ModuleNotFoundError: No module named 'optimizers' occurs without below
 import sys
 import s3prl.optimizers
+assert "optimizers" not in sys.modules
 sys.modules["optimizers"] = s3prl.optimizers
 m = torch.load("/home/hejung/mockingjay_960hr/states-1000000.ckpt")
-
-from mockingjay import *
 
 model = mockingjay_unet()
 
@@ -61,5 +62,5 @@ for i in range(3):
   model.mockingjay.enc.layers[i].lnorm.gamma.assign(w)
   model.mockingjay.enc.layers[i].lnorm.beta.assign(b)
 
-ckpt = tf.train.Checkpoint(root=model)
+ckpt = tf.train.Checkpoint(model)
 ckpt.write("mockingjay_base3.ckpt")

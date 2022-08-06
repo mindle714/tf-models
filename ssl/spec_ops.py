@@ -22,7 +22,7 @@ from __future__ import division
 from __future__ import print_function
 
 import numpy as np
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
 # mel spectrum constants.
 _MEL_BREAK_FREQUENCY_HERTZ = 700.0
@@ -171,7 +171,7 @@ def unwrap(p, discont=np.pi, axis=-1):
     unwrapped: Unwrapped tensor of same size as input.
   """
   dd = diff(p, axis=axis)
-  ddmod = tf.mod(dd + np.pi, 2.0 * np.pi) - np.pi
+  ddmod = tf.math.floormod(dd + np.pi, 2.0 * np.pi) - np.pi
   idx = tf.logical_and(tf.equal(ddmod, -np.pi), tf.greater(dd, 0))
   ddmod = tf.where(idx, tf.ones_like(ddmod) * np.pi, ddmod)
   ph_correct = ddmod - dd
