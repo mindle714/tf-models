@@ -180,7 +180,7 @@ class pasep(tf.keras.layers.Layer):
 
     ds = []
     for idx, block in enumerate(self.blocks):
-      x = block(x)
+      x = block(x, training=training)
       if idx < (len(self.blocks) - 1):
         ds.append(self.denses[idx](x))
 
@@ -208,7 +208,7 @@ class pasep_seq(tf.keras.layers.Layer):
   
   def call(self, inputs, training=None):
     x = inputs
-    return self.pasep(x)
+    return self.pasep(x, training=training)
 
 class pasep_unet(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
@@ -243,7 +243,7 @@ class pasep_unet(tf.keras.layers.Layer):
 
     _in = x
 
-    xs = self.pasep(x)
+    xs = self.pasep(x, training=training)
     x = xs[-1]
 
     x = tf.keras.activations.gelu(x)
