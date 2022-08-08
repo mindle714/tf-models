@@ -122,9 +122,9 @@ class feblock(tf.keras.layers.Layer):
 
     return x
 
-class pasepp(tf.keras.layers.Layer):
+class pasep(tf.keras.layers.Layer):
   def __init__(self, n_fft, hop_len, *args, **kwargs):
-    super(pasepp, self).__init__()
+    super(pasep, self).__init__()
     self.dims = [64, 64, 128, 128, 256, 256, 512, 512]
     self.ksizes = [251, 20, 11, 11, 11, 11, 11, 11]
     self.strides = [1, 10, 2, 1, 2, 1, 2, 2]
@@ -146,20 +146,20 @@ class pasepp(tf.keras.layers.Layer):
 
     return x
 
-class pasepp_seq(tf.keras.layers.Layer):
+class pasep_seq(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
-    super(pasepp_seq, self).__init__()
+    super(pasep_seq, self).__init__()
 
   def build(self, input_shape):
-    self.pasepp = pasepp(400, 160)
+    self.pasep = pasep(400, 160)
   
   def call(self, inputs, training=None):
     x = inputs
-    return self.pasepp(x)
+    return self.pasep(x)
 
-class pasepp_unet(tf.keras.layers.Layer):
+class pasep_unet(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
-    super(pasepp_unet, self).__init__()
+    super(pasep_unet, self).__init__()
 
     self.layer = 4
     self.dims = [32, 32, 32, 32]
@@ -175,7 +175,7 @@ class pasepp_unet(tf.keras.layers.Layer):
   def build(self, input_shape):
     conv_opt = dict(padding='same', use_bias=False)
 
-    self.pasepp = pasepp(self.n_fft, self.hop_len)
+    self.pasep = pasep(self.n_fft, self.hop_len)
 
     self.conv_r = conv1d(self.n_fft//2+1, 3, **conv_opt)
     self.conv_i = conv1d(self.n_fft//2+1, 3, **conv_opt)
@@ -190,7 +190,7 @@ class pasepp_unet(tf.keras.layers.Layer):
 
     _in = x
 
-    xs = self.pasepp(x)
+    xs = self.pasep(x)
     x = xs[-1]
 
     x = tf.keras.activations.gelu(x)
