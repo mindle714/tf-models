@@ -38,8 +38,22 @@ for i in range(8):
   w = m[prefix + '.act.weight'].cpu().numpy().reshape([1, -1])
   model.pasep.blocks[i].prelu.set_weights([w])
 
-#w = m['denseskips.0.weight'].cpu().numpy()
-#model.pasep.denses[0].set_weights([w])
+for i in range(7):
+  prefix = 'denseskips.{}'.format(i)
+  w = m[prefix + '.weight'].cpu().transpose(2,0).numpy()
+  model.pasep.denses[i].set_weights([w])
+
+w = m['rnn.layers.0.linear.weight'].cpu().transpose(1,0).numpy()
+b = m['rnn.layers.0.linear.bias'].cpu().numpy()
+model.pasep.rnn.layers[0].linear.set_weights([w, b])
+
+w = m['W.weight'].cpu().transpose(2,0).numpy()
+b = m['W.bias'].cpu().numpy()
+model.pasep.rnn_out.set_weights([w, b])
+
+mean = m['norm_out.running_mean'].cpu().numpy()
+var = m['norm_out.running_var'].cpu().numpy()
+model.pasep.rnn_norm.set_weights([mean, var])
 
 _out = model(_in)
 print(_out)

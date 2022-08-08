@@ -13,11 +13,40 @@ class qrnnlayer(tf.keras.layers.Layer):
   def build(self, input_shape):
     self.linear = tf.keras.layers.Dense(3 * self.dim)
 
+  # TODO slow version
+  def forgetmult(self, f, x):
+    fx = f * x
+
+    fs = tf.unstack(f, axis=1)
+    fxs = tf.unstack(fx, axis=1)
+
+    xs = []; prev_h = None
+    for f, h in zip(fs, fxs):
+      if prev_h is not None:
+        h = h + (1 - f) * prev_h
+      xs.append(h)
+      prev_h = h
+
+    return tf.stack(xs, axis=1)
+
   def call(self, inputs, training=None):
     x = inputs
 
+    xs = []
+    xs.append(tf.zeros([1, 1, tf.shape(x)[-1]]))
+    xs.append(x[..., :-1, :])
+    xs = tf.concat(xs, 1)
+
+    x = tf.concat([x, xs], -1)
     x = self.linear(x)
-    return x
+    z, f, o = tf.split(x, 3, axis=-1)
+
+    z = tf.math.tanh(z)
+    f = tf.math.sigmoid(f)
+    c = self.forgetmult(f, z)
+
+    h = tf.math.sigmoid(o) * c
+    return h, c[..., -1:, :]
 
 class qrnn(tf.keras.layers.Layer):
   def __init__(self, dim, *args, **kwargs):
@@ -30,11 +59,14 @@ class qrnn(tf.keras.layers.Layer):
 
   def call(self, inputs, training=None):
     x = inputs
-    
+   
+    hs = []
     for layer in self.layers:
-      x = layer(x)
+      x, h = layer(x)
+      hs.append(h)
+    h = tf.concat(hs, 1)
 
-    return x
+    return x, h
 
 class sincconv(tf.keras.layers.Layer):
   def __init__(self, dim, ksize, stride, padding='SAME', *args, **kwargs):
@@ -134,15 +166,36 @@ class pasep(tf.keras.layers.Layer):
       for idx, (dim, ksize, stride) in enumerate(
         zip(self.dims, self.ksizes, self.strides))]
 
-#    self.denses = [conv1d(256, 1, strides=1, use_bias=False) \
-#      for _ in range(len(self.blocks)-1)]
+    self.denses = [conv1d(256, 1, strides=1, use_bias=False) \
+      for _ in range(len(self.blocks)-1)]
+
+    self.rnn = qrnn(512)
+    self.rnn_out = conv1d(256, 1, strides=1)
+    self.rnn_norm = tf.keras.layers.BatchNormalization(
+      epsilon=1e-5, momentum=0.1, center=False, scale=False)
   
   def call(self, inputs, training=None):
     x = inputs
-
     x = tf_expd(x, -1)
-    for block in self.blocks:
+
+    ds = []
+    for idx, block in enumerate(self.blocks):
       x = block(x)
+      if idx < (len(self.blocks) - 1):
+        ds.append(self.denses[idx](x))
+
+    x, h = self.rnn(x)
+    x = self.rnn_out(x)
+
+    for d in ds:
+      factor = tf.shape(d)[1] // tf.shape(x)[1]
+      _d = d[..., :tf.shape(x)[1]*factor, :]
+      _d = tf.reshape(_d, 
+        [tf.shape(_d)[0], tf.shape(x)[1], factor, tf.shape(_d)[-1]])
+      _d = tf.math.reduce_mean(_d, 2)
+      x = x + _d
+
+    x = self.rnn_norm(x, training=training)
 
     return x
 
