@@ -33,7 +33,7 @@ class qrnnlayer(tf.keras.layers.Layer):
     x = inputs
 
     xs = []
-    xs.append(tf.zeros([1, 1, tf.shape(x)[-1]]))
+    xs.append(tf.zeros([tf.shape(x)[0], 1, tf.shape(x)[-1]]))
     xs.append(x[..., :-1, :])
     xs = tf.concat(xs, 1)
 
@@ -155,7 +155,7 @@ class feblock(tf.keras.layers.Layer):
     return x
 
 class pasep(tf.keras.layers.Layer):
-  def __init__(self, n_fft, hop_len, *args, **kwargs):
+  def __init__(self, *args, **kwargs):
     super(pasep, self).__init__()
     self.dims = [64, 64, 128, 128, 256, 256, 512, 512]
     self.ksizes = [251, 20, 11, 11, 11, 11, 11, 11]
@@ -178,8 +178,11 @@ class pasep(tf.keras.layers.Layer):
     x = inputs
     x = tf_expd(x, -1)
 
-    ds = []
+    ds = []; fes = []
     for idx, block in enumerate(self.blocks):
+      if self.strides[idx] > 1:
+        fes.append(x)
+
       x = block(x, training=training)
       if idx < (len(self.blocks) - 1):
         ds.append(self.denses[idx](x))
@@ -197,41 +200,41 @@ class pasep(tf.keras.layers.Layer):
 
     x = self.rnn_norm(x, training=training)
 
-    return x
+    return x, fes
 
 class pasep_seq(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
     super(pasep_seq, self).__init__()
 
   def build(self, input_shape):
-    self.pasep = pasep(400, 160)
+    self.pasep = pasep()
   
   def call(self, inputs, training=None):
     x = inputs
-    return self.pasep(x, training=training)
+    return self.pasep(x, training=training)[0]
 
 class pasep_unet(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
     super(pasep_unet, self).__init__()
-
-    self.layer = 4
-    self.dims = [32, 32, 32, 32]
-    self.ksize = 16
+    self.layer = 5
+    self.ksizes = [20, 11, 11, 11, 11]
+    self.dims = [256, 256, 128, 128, 64]
+    self.strides = [10, 2, 2, 2, 2]
     self.sublayer = 4
-
-    self.n_fft = 400
-    self.hop_len = 160
-
-    self.k = 10
-    self.c = 0.1
 
   def build(self, input_shape):
     conv_opt = dict(padding='same', use_bias=False)
 
-    self.pasep = pasep(self.n_fft, self.hop_len)
-
-    self.conv_r = conv1d(self.n_fft//2+1, 3, **conv_opt)
-    self.conv_i = conv1d(self.n_fft//2+1, 3, **conv_opt)
+    self.pasep = pasep()
+    
+    _strides = self.strides[::-1]
+    self.up_convs = list(zip(
+      [conv1dtrans(self.dims[::-1][idx], self.ksizes[::-1][idx],
+        strides=_strides[idx], **conv_opt) for idx in range(self.layer)],
+      [[conv1d(None, 3,
+        strides=1, **conv_opt) for _ in range(self.sublayer)] for idx in range(self.layer)]))
+    
+    self.conv_post = conv1d(1, 251, **conv_opt)
   
   def call(self, inputs, training=None):
     if isinstance(inputs, tuple):
@@ -243,55 +246,26 @@ class pasep_unet(tf.keras.layers.Layer):
 
     _in = x
 
-    xs = self.pasep(x, training=training)
-    x = xs[-1]
+    x, fes = self.pasep(x, training=training)
 
     x = tf.keras.activations.gelu(x)
-    x = tf.stop_gradient(x)
-
-    x_r = tf.clip_by_value(self.conv_r(x), -self.k, self.k)
-    x_i = tf.clip_by_value(self.conv_i(x), -self.k, self.k)
+    #x = tf.stop_gradient(x)
+    
+    idx = 0; fes = fes[::-1]
+    for _enc, (up_conv, convs) in zip(fes, self.up_convs):
+      x = tf.keras.activations.gelu(up_conv(x))
       
-    in_pad = tf.pad(_in, tf.constant(
-      [[0, 0], [self.n_fft//2, self.n_fft//2]]), mode='reflect')
+      #enc = self.enc_convs[idx](_enc)
+      #enc = _enc
+      #x = tf.concat([x, enc], -1)
 
-    Y = tf.signal.stft(in_pad, 
-      frame_length=self.n_fft, frame_step=self.hop_len, fft_length=self.n_fft)
-    Yr = tf.math.real(Y); Yi = tf.math.imag(Y)
-
-    Mr = -1. / self.c * tf.math.log(tf.nn.relu((self.k - x_r) / (self.k + x_r)) + 1e-10)
-    Mi = -1. / self.c * tf.math.log(tf.nn.relu((self.k - x_i) / (self.k + x_i)) + 1e-10)
-
-    Sr = (Mr * Yr) - (Mi * Yi)
-    Si = (Mr * Yi) + (Mi * Yr)
-    x = tf.signal.inverse_stft(tf.complex(Sr, Si),
-      frame_length=self.n_fft, frame_step=self.hop_len, fft_length=self.n_fft)
-    x = x[..., self.n_fft//2:self.n_fft//2+tf.shape(_in)[1]]
-
-    def get_cirm(Yr, Yi, ref):
-      ref_pad = tf.pad(ref, tf.constant(
-        [[0, 0], [self.n_fft//2, self.n_fft//2]]), mode='reflect')
-
-      S = tf.signal.stft(ref_pad,
-        frame_length=self.n_fft, frame_step=self.hop_len, fft_length=self.n_fft)
-      Sr = tf.math.real(S); Si = tf.math.imag(S)
-
-      M_denom = (Yr * Yr) + (Yi * Yi)
-      Mr_num = (Yr * Sr) + (Yi * Si)
-      Mr = Mr_num / (M_denom + 1e-10)
-
-      Mi_num = (Yr * Si) - (Yi * Sr)
-      Mi = Mi_num / (M_denom + 1e-10)
-
-      Cr_exp = tf.math.exp(-self.c * Mr)
-      #Cr = self.k * ((1 - Cr_exp) / (1 + Cr_exp))
-      Cr = self.k * (-1. + 2. * tf.math.reciprocal_no_nan(1 + Cr_exp))
-        
-      Ci_exp = tf.math.exp(-self.c * Mi)
-      #Ci = self.k * ((1 - Ci_exp) / (1 + Ci_exp))
-      Ci = self.k * (-1. + 2. * tf.math.reciprocal_no_nan(1 + Ci_exp))
-
-      return Cr, Ci
+      for conv in convs:
+        x = tf.keras.activations.gelu(conv(x)) + x
+      idx += 1
+    
+    x = self.conv_post(x)
+    x = tf.math.tanh(x)
+    x = tf.squeeze(x, -1)
 
     if ref is not None:
       x = x[..., :tf.shape(ref)[-1]]
@@ -316,10 +290,6 @@ class pasep_unet(tf.keras.layers.Layer):
       spec_loss += stft_loss(x, ref, 50, 10, 2048)
       spec_loss += stft_loss(x, ref, 10, 2, 512)
 
-      Cr, Ci = get_cirm(Yr, Yi, ref)
-      cirm_loss = tf.math.reduce_mean(tf.math.abs(Cr - x_r))
-      cirm_loss += tf.math.reduce_mean(tf.math.abs(Ci - x_i))
-
-      return samp_loss + spec_loss, cirm_loss
+      return samp_loss + spec_loss
 
     return x
