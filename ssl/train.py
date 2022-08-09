@@ -87,8 +87,8 @@ if args.val_tfrec is not None:
 lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
-import tffts
-m = tffts.tffts_unet()
+import pasep
+m = pasep.pasep_unet()
 
 specs = [val.__spec__ for name, val in sys.modules.items() \
   if isinstance(val, types.ModuleType) and not ('_main_' in name)]
@@ -153,7 +153,7 @@ if args.warm_start is not None:
 
   _in = np.zeros((args.batch_size, samp_len), dtype=np.float32)
   _ = m((_in, None))
-  ckpt.read(args.warm_start)
+  ckpt.read(args.warm_start).assert_consumed()
 
   if not args.from_init:
     if isinstance(opt_weight, np.ndarray):

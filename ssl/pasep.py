@@ -265,7 +265,7 @@ class pasep_unet(tf.keras.layers.Layer):
     
     x = self.conv_post(x)
     x = tf.math.tanh(x)
-    x = tf.squeeze(x, -1)
+    x = _in + tf.squeeze(x, -1)
 
     if ref is not None:
       x = x[..., :tf.shape(ref)[-1]]
