@@ -5,16 +5,6 @@ from spec_ops import *
 tf_sum = tf.math.reduce_sum
 tf_expd = tf.expand_dims
 
-def gelu(features, approximate=False, name=None):
-  if approximate:
-    coeff = tf.cast(0.044715, features.dtype)
-    return 0.5 * features * (
-          1.0 + tf.math.tanh(0.7978845608028654 *
-                              (features + coeff * tf.math.pow(features, 3))))
-  else:
-    return 0.5 * features * (1.0 + tf.math.erf(
-          features / tf.cast(1.4142135623730951, features.dtype)))
-
 def _normalize_wav_decibel(wav, target_level=-25):
   rms = (tf.math.reduce_mean(wav**2))**0.5
   scalar = (10 ** (target_level / 20)) / (rms + 1e-10)
@@ -132,7 +122,7 @@ class enclayer(tf.keras.layers.Layer):
     x, attn_mask = inputs
 
     x = self.atten((x, attn_mask))
-    _x = gelu(self.inter(x))
+    _x = tf.keras.activations.gelu(self.inter(x))
 
     x = self.out(_x) + x
     x = self.lnorm(x)
@@ -212,6 +202,9 @@ class tera_unet(tf.keras.layers.Layer):
 
     self.tera = tera(self.n_fft, self.hop_len)
 
+    self.conv_s1 = conv1d(self.n_fft//2+1, 3, **conv_opt)
+    self.conv_s2 = conv1d(self.n_fft//2+1, 3, **conv_opt)
+
     self.conv_r_s1 = conv1d(self.n_fft//2+1, 3, **conv_opt)
     self.conv_i_s1 = conv1d(self.n_fft//2+1, 3, **conv_opt)
     self.conv_r_s2 = conv1d(self.n_fft//2+1, 3, **conv_opt)
@@ -232,33 +225,36 @@ class tera_unet(tf.keras.layers.Layer):
     xs = self.tera(x)
     x = xs[-1]
 
-    x = gelu(x)
+    x = tf.keras.activations.gelu(x)
     #x = tf.stop_gradient(x)
 
-    def get_hyp(x, conv_r, conv_i):
-      x_r = tf.clip_by_value(conv_r(x), -self.k, self.k)
-      x_i = tf.clip_by_value(conv_i(x), -self.k, self.k)
-      
-      in_pad = tf.pad(_in, tf.constant(
-        [[0, 0], [self.n_fft//2, self.n_fft//2]]), mode='reflect')
+    x_s1 = tf.keras.activations.gelu(self.conv_s1(x))
+    x_s2 = tf.keras.activations.gelu(self.conv_s2(x))
+    
+    in_pad = tf.pad(_in, tf.constant(
+      [[0, 0], [self.n_fft//2, self.n_fft//2]]), mode='reflect')
 
-      Y = tf.signal.stft(in_pad, 
-        frame_length=self.n_fft, frame_step=self.hop_len, fft_length=self.n_fft)
-      Yr = tf.math.real(Y); Yi = tf.math.imag(Y)
+    Y = tf.signal.stft(in_pad, 
+      frame_length=self.n_fft, frame_step=self.hop_len, fft_length=self.n_fft)
+    Yr = tf.math.real(Y); Yi = tf.math.imag(Y)
+
+    def get_hyp(_x, conv_r, conv_i):
+      x_r = tf.clip_by_value(conv_r(_x), -self.k, self.k)
+      x_i = tf.clip_by_value(conv_i(_x), -self.k, self.k)
 
       Mr = -1. / self.c * tf.math.log(tf.nn.relu((self.k - x_r) / (self.k + x_r)) + 1e-10)
       Mi = -1. / self.c * tf.math.log(tf.nn.relu((self.k - x_i) / (self.k + x_i)) + 1e-10)
 
       Sr = (Mr * Yr) - (Mi * Yi)
       Si = (Mr * Yi) + (Mi * Yr)
-      x = tf.signal.inverse_stft(tf.complex(Sr, Si),
+      _x = tf.signal.inverse_stft(tf.complex(Sr, Si),
         frame_length=self.n_fft, frame_step=self.hop_len, fft_length=self.n_fft)
-      x = x[..., self.n_fft//2:self.n_fft//2+tf.shape(_in)[1]]
+      _x = _x[..., self.n_fft//2:self.n_fft//2+tf.shape(_in)[1]]
 
-      return x, Yr, Yi, x_r, x_i
+      return _x, x_r, x_i
 
-    x_s1, Yr_s1, Yi_s1, x_r_s1, x_i_s1 = get_hyp(x, self.conv_r_s1, self.conv_i_s1)
-    x_s2, Yr_s2, Yi_s2, x_r_s2, x_i_s2 = get_hyp(x, self.conv_r_s2, self.conv_i_s2)
+    x_s1, x_r_s1, x_i_s1 = get_hyp(x_s1, self.conv_r_s1, self.conv_i_s1)
+    x_s2, x_r_s2, x_i_s2 = get_hyp(x_s2, self.conv_r_s2, self.conv_i_s2)
     x = tf.concat([tf_expd(x_s1, -1), tf_expd(x_s2, -1)], -1) 
 
     def get_cirm(Yr, Yi, ref):
@@ -291,8 +287,8 @@ class tera_unet(tf.keras.layers.Layer):
       snr, sort_x, sort_sm = si_snr(sm, x, return_ref=True)
       loss = -tf.math.reduce_mean(snr)
 
-      Cr_s1, Ci_s1 = get_cirm(Yr_s1, Yi_s1, sort_sm[..., 0]) 
-      Cr_s2, Ci_s2 = get_cirm(Yr_s2, Yi_s2, sort_sm[..., 1]) 
+      Cr_s1, Ci_s1 = get_cirm(Yr, Yi, sort_sm[..., 0]) 
+      Cr_s2, Ci_s2 = get_cirm(Yr, Yi, sort_sm[..., 1]) 
 
       cirm_loss = tf.math.reduce_mean(tf.math.abs(Cr_s1 - x_r_s1))
       cirm_loss += tf.math.reduce_mean(tf.math.abs(Ci_s1 - x_i_s1))
