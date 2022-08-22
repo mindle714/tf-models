@@ -47,10 +47,10 @@ print_sep_epoch() {
     if ! tail -n1 $eval | grep -q final; then
       score1="$(cat $eval | awk '{s+=$1} END{print s/NR}')"
       len="$(wc -l $eval | awk '{print $1}')"
-      printf "%20s \t%.5f\tIN PROGRESS(%d)\n" $suf $score1 $len
+      printf "%30s \t%.5f\tIN PROGRESS(%d)\n" $suf $score1 $len
       continue
     fi
-    printf "%20s\t" "$suf($epoch)"; tail -n1 $eval | grep final | sed 's/final: //g' \
+    printf "%30s\t" "$suf($epoch)"; tail -n1 $eval | grep final | sed 's/final: //g' \
       | awk '{printf "%.5f\n", $1}'
   done
 }
@@ -71,12 +71,12 @@ if ! $sep; then
 else
   if [ -z ${epochs+x} ]; then
     epochs="$(ls *.eval | grep -o "\-[0-9]*\.eval" | cut -d- -f2 | cut -d. -f1 | sort -k1 -n | uniq)"
-    printf "%20s\tSI-SNR\n" ""
+    printf "%30s\tSI-SNR\n" ""
     for epoch in $epochs; do
       print_sep_epoch $epoch
     done
   else
-    printf "%20s\tSI-SNR\n" ""
+    printf "%30s\tSI-SNR\n" ""
     for epoch in "${epochs[@]}"; do
       print_sep_epoch $epoch
     done
