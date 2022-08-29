@@ -189,7 +189,7 @@ class encoder(tf.keras.layers.Layer):
 
 class wav2vec2(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
-    super(wav2vec2, self).__init__()
+    super(wav2vec2, self).__init__(*args, **kwargs)
 
   def build(self, input_shape):
     self.fe = featencoder()
