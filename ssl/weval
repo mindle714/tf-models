@@ -1,12 +1,13 @@
 #!/usr/bin/bash
 
-USAGE="Usage: $0 -e <exp>"
+USAGE="Usage: $0 -e <exp> [-s]"
 EXAMPLE="($0 -e naive)"
 
-unset exps;
-while getopts ":e:" opt; do
+unset exps; sep=false
+while getopts ":e:s" opt; do
   case $opt in
     e) exps+=("$OPTARG") ;;
+    s) sep=true ;;
     ?) echo "$USAGE"; echo "$EXAMPLE"; exit 2 ;;
   esac
 done
@@ -36,7 +37,12 @@ for exp in "${exps[@]}"; do
       sleep 10s
     done
 
-    CUDA_VISIBLE_DEVICES=-1 python3 eval.py \
-    --ckpt exps/$exp/model-${epoch}.ckpt 
+    if ! $sep; then
+      CUDA_VISIBLE_DEVICES=-1 python3 eval.py \
+      --ckpt exps/$exp/model-${epoch}.ckpt 
+    else
+      CUDA_VISIBLE_DEVICES=-1 python3 eval_sep.py \
+      --ckpt exps/$exp/model-${epoch}.ckpt 
+    fi
   done
 done

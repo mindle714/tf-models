@@ -66,11 +66,23 @@ elif expname.startswith("tera"):
     sys.exit("tera is loaded from {}".format(tera.__file__))
   m = tera.tera_unet()
 
+elif expname.startswith("mockingjay"):
+  import mockingjay
+  if os.path.dirname(mockingjay.__file__) != expdir:
+    sys.exit("mockingjay is loaded from {}".format(mockingjay.__file__))
+  m = mockingjay.mockingjay_unet()
+
 elif expname.startswith("tffts"):
   import tffts
   if os.path.dirname(tffts.__file__) != expdir:
     sys.exit("tffts is loaded from {}".format(tffts.__file__))
   m = tffts.tffts_unet()
+
+elif expname.startswith("pasep"):
+  import pasep
+  if os.path.dirname(pasep.__file__) != expdir:
+    sys.exit("pasep is loaded from {}".format(pasep.__file__))
+  m = pasep.pasep_unet()
 
 else:
   import model
@@ -128,7 +140,7 @@ if args.save_result:
     soundfile.write(os.path.join(output, "{}_ref_{}.wav".format(resname, idx)), ref, 16000)
 
 else:
-  with open("{}.eval".format(resname), "w") as f:
+  with open(os.path.join("results", "{}.eval".format(resname)), "w") as f:
     pcount = 0
     pesq_tot = 0; stoi_tot = 0
     csig_tot = 0; cbak_tot = 0
