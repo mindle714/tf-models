@@ -3,8 +3,8 @@
 #epoch=100000; for exp in unisat_base_v4/ unisat_pre_v4/ \
 #  unisat_pre_v4_sg/ wavlm_base/ wavlm_pre/; do
 #epoch=10000;
-for epoch in $(seq 10000 10000 100000); do 
-  for exp in tera_pre3_invg2; do
+for epoch in 5000; do 
+  for exp in tera_4f_v2_lv2_mdelta; do
 
     if [ -f "$exp-${epoch}.eval" ]; then
       echo "$exp-${epoch}.eval already exists"

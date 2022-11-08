@@ -1,13 +1,14 @@
 #!/usr/bin/bash
 
-USAGE="Usage: $0 -e <exp> [-s]"
+USAGE="Usage: $0 -e <exp> [-s] [-m <max-epoch>]"
 EXAMPLE="($0 -e naive)"
 
-unset exps; sep=false
-while getopts ":e:s" opt; do
+unset exps; sep=false; maxepoch=100000
+while getopts ":e:sm:" opt; do
   case $opt in
     e) exps+=("$OPTARG") ;;
     s) sep=true ;;
+    m) maxepoch="$OPTARG" ;;
     ?) echo "$USAGE"; echo "$EXAMPLE"; exit 2 ;;
   esac
 done
@@ -22,7 +23,7 @@ for exp in "${exps[@]}"; do
     continue
   fi
 
-  for epoch in $(seq 10000 10000 100000); do 
+  for epoch in $(seq 10000 10000 ${maxepoch}); do 
     if [ -f "results/$exp-${epoch}.eval" ]; then
       echo "$exp-${epoch}.eval already exists"
       continue

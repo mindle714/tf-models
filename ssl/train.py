@@ -16,17 +16,32 @@ parser.add_argument("--tfrec", type=str, required=True)
 parser.add_argument("--val-tfrec", type=str, required=False, default=None)
 parser.add_argument("--batch-size", type=int, required=False, default=8) 
 parser.add_argument("--eval-step", type=int, required=False, default=100) 
-parser.add_argument("--save-step", type=int, required=False, default=1000) 
-parser.add_argument("--val-step", type=int, required=False, default=5000) 
-parser.add_argument("--train-step", type=int, required=False, default=100000) 
+parser.add_argument("--save-step", type=int, required=False, default=10000) 
+parser.add_argument("--val-step", type=int, required=False, default=10000) 
+parser.add_argument("--train-step", type=int, required=False, default=50000) 
 parser.add_argument("--begin-lr", type=float, required=False, default=1e-4) 
 parser.add_argument("--lr-decay-rate", type=float, required=False, default=0.96)
 parser.add_argument("--lr-decay-step", type=float, required=False, default=2000.)
 parser.add_argument("--val-lr-update", type=float, required=False, default=3) 
+parser.add_argument("--begin-factors", type=float, nargs="+", default=[])
+parser.add_argument("--beta-r", type=float, required=False, default=0.999) 
+parser.add_argument("--beta-m", type=float, required=False, default=0.99)
+parser.add_argument("--fnorm-schedule", type=str, required=False,
+  choices=["linear", "exp", "cos", "stair"], default="linear")
+parser.add_argument("--fnorm-steps", type=float, nargs="+", default=[])
+parser.add_argument("--fnorm-decay", type=float, required=False, default=100) 
 parser.add_argument("--output", type=str, required=True) 
 parser.add_argument("--warm-start", type=str, required=False, default=None)
 parser.add_argument("--from-init", action='store_true')
 args = parser.parse_args()
+
+if len(args.fnorm_steps) == 0:
+  args.fnorm_steps = [70000, 70000, 70000]
+assert len(args.fnorm_steps) == 3
+
+if len(args.begin_factors) == 0:
+  args.begin_factors = [0., 0., 0.]
+assert len(args.begin_factors) == 3
 
 import json
 tfrec_args = os.path.join(args.tfrec, "ARGS")
@@ -87,8 +102,8 @@ if args.val_tfrec is not None:
 lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
-import pasep
-m = pasep.pasep_unet()
+import tera
+m = tera.tera_unet(args.beta_r, args.beta_m)
 
 specs = [val.__spec__ for name, val in sys.modules.items() \
   if isinstance(val, types.ModuleType) and not ('_main_' in name)]
@@ -107,17 +122,27 @@ log_writer.set_as_default()
 @tf.function
 def run_step(step, pcm, ref, training=True):
   with tf.GradientTape() as tape, log_writer.as_default():
-    loss = m((pcm, ref), training=training)
+    loss, closs, sim = m((pcm, ref), training=training)
     loss = tf.math.reduce_mean(loss)
     tf.summary.scalar("loss", loss, step=step)
-    total_loss = loss
+    closs = tf.math.reduce_mean(closs)
+    tf.summary.scalar("closs", closs, step=step)
+    sim = tf.math.reduce_mean(sim)
+    tf.summary.scalar("sim", sim, step=step)
+    total_loss = loss + closs
 
   if training:
-    grads = tape.gradient(total_loss, m.trainable_weights)
+    train_weights = [e for e in m.trainable_weights if 'frozen' not in e.name]
+    assert len(m.trainable_weights) - len(train_weights) == 52
+    grads = tape.gradient(total_loss, train_weights)
+    gnorm = tf.linalg.global_norm(grads)
     grads, _ = tf.clip_by_global_norm(grads, 5.)
-    opt.apply_gradients(zip(grads, m.trainable_weights))
+    opt.apply_gradients(zip(grads, train_weights))
 
-  return loss
+    #for grad, var in zip(grads, train_weights):
+    #  tf.summary.histogram(var.name + "/gradient", grad, step=step)
+
+  return loss, closs, sim
 
 import logging
 logger = tf.get_logger()
@@ -152,7 +177,9 @@ if args.warm_start is not None:
       opt_cfg = np.load(opt_cfg, allow_pickle=True).flatten()[0] 
 
   _in = np.zeros((args.batch_size, samp_len), dtype=np.float32)
-  _ = m((_in, None))
+  _ = m(_in)
+  _ = m.tera(_in)
+  _ = m.tera_frozen(_in)
   ckpt.read(args.warm_start).assert_consumed()
 
   if not args.from_init:
@@ -165,16 +192,52 @@ if args.warm_start is not None:
       opt.apply_gradients(zip(zero_grads, grad_vars))
       opt.set_weights(opt_weight)
 
+def cos_decay(step, decay_steps, init_lr, alpha=0.):
+  step = min(step, decay_steps)
+  cosine_decay = 0.5 * (1 + np.cos(np.pi * step / decay_steps))
+  decayed = (1 - alpha) * cosine_decay + alpha
+  return init_lr * decayed
+
+def exp_decay(step, decay_steps, init_lr, end_lr=0.01):
+  if step > decay_steps: return 0.
+  if init_lr <= 0.: return 0.
+  decay_rate = end_lr / init_lr
+  return init_lr * decay_rate ** (step / decay_steps)
+
+def linear_decay(step, decay_steps, init_lr, end_lr = 0.):
+  if step > decay_steps: return end_lr
+  return ((end_lr - init_lr) / decay_steps) * step + init_lr
+
+def stair_decay(step, decay_steps, init_lr, end_lr = 0., decay_unit = args.fnorm_decay):
+  if step > decay_steps: return end_lr
+  _step = (step // decay_unit) * decay_unit
+  return ((end_lr - init_lr) / decay_steps) * _step + init_lr
+
+if args.fnorm_schedule == "linear":
+  factor_decay = linear_decay
+elif args.fnorm_schedule == "exp":
+  factor_decay = exp_decay
+elif args.fnorm_schedule == "cos":
+  factor_decay = cos_decay
+elif args.fnorm_schedule == "stair":
+  factor_decay = stair_decay
+else:
+  assert False, "unknown type {}".format(args.fnorm_schedule)
+
 for idx, data in enumerate(dataset):
   idx += init_epoch
   if idx > args.train_step: break
 
-  loss = run_step(tf.cast(idx, tf.int64), data["pcm"], data["ref"])
+  for i in range(3):
+    m.tera.enc.factors[i].assign(
+      factor_decay(idx, args.fnorm_steps[i], args.begin_factors[i])) 
+
+  loss, closs, sim = run_step(tf.cast(idx, tf.int64), data["pcm"], data["ref"])
   log_writer.flush()
 
   if idx > init_epoch and idx % args.eval_step == 0:
-    logger.info("gstep[{}] loss[{:.2f}] lr[{:.2e}]".format(
-      idx, loss, lr.numpy()))
+    logger.info("gstep[{}] loss[{:.2f}] closs[{:.2f}] lr[{:.2e}] flr[{}] sim[{:.4f}]".format(
+      idx, loss, closs, lr.numpy(), ",".join([str("{:.2f}".format(e.numpy())) for e in m.tera.enc.factors]), sim))
 
   if val_dataset is None:
     # follow tf.keras.optimizers.schedules.ExponentialDecay

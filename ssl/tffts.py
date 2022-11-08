@@ -123,10 +123,26 @@ class tffts_unet(tf.keras.layers.Layer):
     
     self.tstfts = [tstft(flen, hlen) for flen, hlen in zip(self.flens, self.hlens)]
     self.itstfts = [tstft(flen, hlen) for flen, hlen in zip(self.flens, self.hlens)]
-    self.tfft_rprjs = [conv2d(1, (8,8), strides=(2,2), **conv_opt) for _ in self.hlens]
-    self.tfft_iprjs = [conv2d(1, (8,8), strides=(2,2), **conv_opt) for _ in self.hlens]
-    self.itfft_rprjs = [conv2dtrans(1, (8,8), strides=(2,2), **conv_opt) for _ in self.flens]
-    self.itfft_iprjs = [conv2dtrans(1, (8,8), strides=(2,2), **conv_opt) for _ in self.flens]
+    #self.tfft_rprjs = [conv2d(1, (8,8), strides=(2,2), **conv_opt) for _ in self.hlens]
+    #self.tfft_iprjs = [conv2d(1, (8,8), strides=(2,2), **conv_opt) for _ in self.hlens]
+    self.tfft_rprjs = [
+      conv2d(1, (8,16), strides=(2,2), **conv_opt),
+      conv2d(1, (16,8), strides=(2,2), **conv_opt),
+      conv2d(1, (32,4), strides=(2,2), **conv_opt)]
+    self.tfft_iprjs = [
+      conv2d(1, (8,16), strides=(2,2), **conv_opt),
+      conv2d(1, (16,8), strides=(2,2), **conv_opt),
+      conv2d(1, (32,4), strides=(2,2), **conv_opt)]
+    #self.itfft_rprjs = [conv2dtrans(1, (8,8), strides=(2,2), **conv_opt) for _ in self.flens]
+    #self.itfft_iprjs = [conv2dtrans(1, (8,8), strides=(2,2), **conv_opt) for _ in self.flens]
+    self.itfft_rprjs = [
+      conv2dtrans(1, (8,16), strides=(2,2), **conv_opt),
+      conv2dtrans(1, (16,8), strides=(2,2), **conv_opt),
+      conv2dtrans(1, (32,4), strides=(2,2), **conv_opt)]
+    self.itfft_iprjs = [
+      conv2dtrans(1, (8,16), strides=(2,2), **conv_opt),
+      conv2dtrans(1, (16,8), strides=(2,2), **conv_opt),
+      conv2dtrans(1, (32,4), strides=(2,2), **conv_opt)]
 
     self.wav2vec2 = wav2vec2(self.pretrain)
 
