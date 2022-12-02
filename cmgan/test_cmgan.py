@@ -1,21 +1,61 @@
 import soundfile
-#pcm, _ = soundfile.read("/home/hejung/speech-commands/TEST_SET/no/97f4c236_nohash_0.wav")
-#pcm, _ = soundfile.read("/home/hejung/speech-commands/TEST_SET/up/9e2ce5e3_nohash_2.wav")
-pcm, _ = soundfile.read("/home/hejung/s3prl/s3prl/downstream/speech_commands/dummy_data/train/yes/01d22d03_nohash_0.wav")
+pcm, _ = soundfile.read("dummy_one/test/noisy/p257_434.wav")
+assert _ == 16000
 
 import tensorflow as tf
+from cmgan import *
+
+model = cmgan()
 
 import torch
-#m = torch.load("/home/hejung/transformers/examples/pytorch/audio-classification/wav2vec2-base-ft-keyword-spotting/checkpoint-6386/pytorch_model.bin")
-m = torch.load("/home/hejung/wav2vec2-base/pytorch_model.bin")
-
-from wav2vec2 import *
-
-model = wav2vec2_seq()
+m = torch.load("/home/hejung/CMGAN/src/best_ckpt/ckpt")
 
 import numpy as np
 _in = np.reshape(pcm, [1, -1])
 _tmp = model(_in)
+print(_tmp)
+
+w = m['dense_encoder.conv_1.0.weight'].cpu().numpy()
+b = m['dense_encoder.conv_1.0.bias'].cpu().numpy()
+model.tscnet.denc.conv_1.set_weights([w.transpose([2, 3, 1, 0]), b])
+
+w = m['dense_encoder.conv_1.1.weight'].cpu().numpy()
+b = m['dense_encoder.conv_1.1.bias'].cpu().numpy()
+model.tscnet.denc.inorm2d.gamma.assign(w)
+model.tscnet.denc.inorm2d.beta.assign(b)
+
+w = m['dense_encoder.conv_1.2.weight'].cpu().numpy()
+model.tscnet.denc.prelu.set_weights([w.reshape([1, 1, -1])])
+
+prefix = 'dense_encoder.dilated_dense'
+for i in range(len(model.tscnet.denc.dildense.convs)):
+  w = m['{}.conv{}.weight'.format(prefix, i+1)].cpu().numpy()
+  b = m['{}.conv{}.bias'.format(prefix, i+1)].cpu().numpy()
+  model.tscnet.denc.dildense.convs[i].set_weights([w.transpose([2, 3, 1, 0]), b])
+  
+  w = m['{}.norm{}.weight'.format(prefix, i+1)].cpu().numpy()
+  b = m['{}.norm{}.bias'.format(prefix, i+1)].cpu().numpy()
+  model.tscnet.denc.dildense.norms[i].gamma.assign(w)
+  model.tscnet.denc.dildense.norms[i].beta.assign(b)
+ 
+  w = m['{}.prelu{}.weight'.format(prefix, i+1)].cpu().numpy()
+  model.tscnet.denc.dildense.prelus[i].set_weights([w.reshape([1, 1, -1])])
+
+w = m['dense_encoder.conv_2.0.weight'].cpu().numpy()
+b = m['dense_encoder.conv_2.0.bias'].cpu().numpy()
+model.tscnet.denc.conv_2.set_weights([w.transpose([2, 3, 1, 0]), b])
+
+w = m['dense_encoder.conv_2.1.weight'].cpu().numpy()
+b = m['dense_encoder.conv_2.1.bias'].cpu().numpy()
+model.tscnet.denc.inorm2d_2.gamma.assign(w)
+model.tscnet.denc.inorm2d_2.beta.assign(b)
+
+w = m['dense_encoder.conv_2.2.weight'].cpu().numpy()
+model.tscnet.denc.prelu_2.set_weights([w.reshape([1, 1, -1])])
+
+print(model(_in))
+import sys
+sys.exit()
 
 def load_norm(prefix, e):
   w = m['{}.weight'.format(prefix, i)].cpu().numpy()
