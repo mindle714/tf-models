@@ -5,47 +5,6 @@ from spec_ops import *
 tf_sum = tf.math.reduce_sum
 tf_expd = tf.expand_dims
 
-class self_attn(tf.keras.layers.Layer):
-  def __init__(self, *args, **kwargs):
-    self.num_heads = 12
-    self.head_dim = 64
-    super(self_attn, self).__init__()
-
-  def build(self, input_shape):
-    self.all_head_size = self.num_heads * self.head_dim
-    self.query = tf.keras.layers.Dense(self.all_head_size, use_bias=True)
-    self.key = tf.keras.layers.Dense(self.all_head_size, use_bias=True)
-    self.value = tf.keras.layers.Dense(self.all_head_size, use_bias=True)
-  
-  def call(self, inputs, training=None):
-    x, attn_mask = inputs
-
-    mixed_q = self.query(x)
-    mixed_k = self.key(x)
-    mixed_v = self.value(x)
-    
-    def reshape(e):
-      e = tf.reshape(e,
-        tf.concat([tf.shape(x)[:2], [self.num_heads, self.head_dim]], 0))
-      e = tf.transpose(e, [0, 2, 1, 3])
-      return e
-
-    q = reshape(mixed_q)
-    k = reshape(mixed_k)
-    v = reshape(mixed_v)
-
-    attn_score = tf.linalg.matmul(q, k, transpose_b=True)
-    attn_score /= np.sqrt(self.head_dim)
-    attn_score += attn_mask
-
-    attn_probs = tf.nn.softmax(attn_score, -1)
-    ctx = tf.linalg.matmul(attn_probs, v)
-    ctx = tf.transpose(ctx, [0, 2, 1, 3])
-    ctx = tf.reshape(ctx,
-      tf.concat([tf.shape(ctx)[:-2], [-1]], 0))
- 
-    return ctx
-
 class attention(tf.keras.layers.Layer):
   def __init__(self, heads = 8, hdim = 64, *args, **kwargs):
     super(attention, self).__init__()
