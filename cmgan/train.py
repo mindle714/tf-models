@@ -14,7 +14,7 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--tfrec", type=str, required=True) 
 parser.add_argument("--val-tfrec", type=str, required=False, default=None)
-parser.add_argument("--batch-size", type=int, required=False, default=8) 
+parser.add_argument("--batch-size", type=int, required=False, default=4) 
 parser.add_argument("--eval-step", type=int, required=False, default=100) 
 parser.add_argument("--save-step", type=int, required=False, default=10000) 
 parser.add_argument("--val-step", type=int, required=False, default=10000) 
@@ -99,29 +99,27 @@ import shutil
 for origin in origins + [os.path.abspath(__file__)]:
   shutil.copy(origin, args.output)
 
-import datetime
 logdir = os.path.join(args.output, "logs")
 log_writer = tf.summary.create_file_writer(logdir)
 log_writer.set_as_default()
+tf.profiler.experimental.start(logdir)
 
 @tf.function
 def run_step(step, pcm, ref, training=True):
   with tf.GradientTape() as tape, log_writer.as_default():
-    loss, closs = m((pcm, ref), training=training)
+    loss = m((pcm, ref), training=training)
     loss = tf.math.reduce_mean(loss)
     tf.summary.scalar("loss", loss, step=step)
-    closs = tf.math.reduce_mean(closs)
-    tf.summary.scalar("closs", closs, step=step)
-    total_loss = loss + closs
+    total_loss = loss
 
   if training:
     train_weights = [e for e in m.trainable_weights if 'frozen' not in e.name]
-    assert len(m.trainable_weights) - len(train_weights) == 52
+    assert len(m.trainable_weights) - len(train_weights) == 0
     grads = tape.gradient(total_loss, train_weights)
     grads, _ = tf.clip_by_global_norm(grads, 5.)
     opt.apply_gradients(zip(grads, train_weights))
 
-  return loss, closs
+  return loss
 
 import logging
 logger = tf.get_logger()
@@ -169,16 +167,28 @@ if args.warm_start is not None:
       opt.apply_gradients(zip(zero_grads, grad_vars))
       opt.set_weights(opt_weight)
 
+_traced_cnt = 10
 for idx, data in enumerate(dataset):
   idx += init_epoch
   if idx > args.train_step: break
 
-  loss, closs = run_step(tf.cast(idx, tf.int64), data["pcm"], data["ref"])
+  if _traced_cnt > 0:
+    with tf.profiler.experimental.Trace('train', step_num=idx, _r=1):
+      loss = run_step(tf.cast(idx, tf.int64), data["pcm"], data["ref"])
+    _traced_cnt -= 1
+
+  elif _traced_cnt == 0:
+    tf.profiler.experimental.stop()
+    _traced_cnt -= 1
+
+  else:
+    loss = run_step(tf.cast(idx, tf.int64), data["pcm"], data["ref"])
+
   log_writer.flush()
 
   if idx > init_epoch and idx % args.eval_step == 0:
-    logger.info("gstep[{}] loss[{:.2f}] closs[{:.2f}] lr[{:.2e}]".format(
-      idx, loss, closs, lr.numpy()))
+    logger.info("gstep[{}] loss[{:.2f}] lr[{:.2e}]".format(
+      idx, loss, lr.numpy()))
 
   if val_dataset is None:
     # follow tf.keras.optimizers.schedules.ExponentialDecay

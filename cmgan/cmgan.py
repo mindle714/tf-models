@@ -23,7 +23,7 @@ class attention(tf.keras.layers.Layer):
     self.out = tf.keras.layers.Dense(dim, use_bias=True)
 
     self.rel_pemb = tf.keras.layers.Embedding(2 * self.max_pemb + 1, self.hdim)
-    self.drop = tf.keras.layers.Dropout(rate = 0.2)
+#    self.drop = tf.keras.layers.Dropout(rate = 0.2)
   
   def call(self, inputs, training=None):
     x, attn_mask = inputs
@@ -60,7 +60,7 @@ class attention(tf.keras.layers.Layer):
       tf.concat([tf.shape(ctx)[:-2], [-1]], 0))
 
     x = self.out(ctx)
-    x = self.drop(x)
+#    x = self.drop(x)
  
     return x
 
@@ -73,7 +73,7 @@ class fforward(tf.keras.layers.Layer):
     dim = input_shape[-1]
 
     self.ff1 = tf.keras.layers.Dense(dim * self.mult)
-    self.drop = tf.keras.layers.Dropout(rate = 0.2)
+#    self.drop = tf.keras.layers.Dropout(rate = 0.2)
     self.ff2 = tf.keras.layers.Dense(dim)
   
   def call(self, inputs, training=None):
@@ -81,9 +81,9 @@ class fforward(tf.keras.layers.Layer):
 
     x = self.ff1(x)
     x = tf.keras.activations.swish(x)
-    x = self.drop(x)
+#    x = self.drop(x)
     x = self.ff2(x)
-    x = self.drop(x)
+#    x = self.drop(x)
 
     return x
 
@@ -102,7 +102,7 @@ class conformerconv(tf.keras.layers.Layer):
     self.dconv = depthconv1d(self.ksize)
     self.bnorm = tf.keras.layers.BatchNormalization(epsilon = 1e-5, momentum = 0.9)
     self.conv_2 = conv1d(dim, 1)
-    self.drop = tf.keras.layers.Dropout(rate = 0.)
+#    self.drop = tf.keras.layers.Dropout(rate = 0.)
   
   def call(self, inputs, training=None):
     x = inputs
@@ -115,7 +115,7 @@ class conformerconv(tf.keras.layers.Layer):
     x = self.bnorm(x)
     x = tf.keras.activations.swish(x)
     x = self.conv_2(x)
-    x = self.drop(x)
+#    x = self.drop(x)
 
     return x
 
@@ -404,11 +404,10 @@ class cmgan(tf.keras.layers.Layer):
       x = inputs
       ref = None
 
-    _in = x
-
     x_len = tf.shape(x)[-1]
     c = tf.math.sqrt(tf.cast(x_len, tf.float32) / 
             tf.math.reduce_sum(x ** 2., -1))
+    c = tf_expd(c, -1)
     x *= c
 
     tot_len = tf.cast(tf.math.ceil(x_len / 100), tf.int32) * 100
@@ -428,5 +427,29 @@ class cmgan(tf.keras.layers.Layer):
       frame_length=self.n_fft, frame_step=self.hop_len, fft_length=self.n_fft)
     x /= c
     x = x[..., self.n_fft//2:self.n_fft//2+x_len]
+
+    if ref is not None:
+      samp_loss = tf.math.reduce_mean((x - ref) ** 2)
+
+      def stft_loss(x, ref, frame_length, frame_step, fft_length):
+        stft_opt = dict(frame_length=frame_length,
+          frame_step=frame_step, fft_length=fft_length)
+        mag_x = tf.math.abs(stft(x, **stft_opt))
+        mag_ref = tf.math.abs(stft(ref, **stft_opt))
+
+        fro_opt = dict(axis=(-2, -1), ord='fro')
+        sc_loss = tf.norm(mag_x - mag_ref, **fro_opt) / (tf.norm(mag_x, **fro_opt) + 1e-9)
+        sc_loss = tf.reduce_mean(sc_loss)
+
+        mag_loss = tf.math.log(mag_x + 1e-9) - tf.math.log(mag_ref + 1e-9)
+        mag_loss = tf.reduce_mean(tf.math.abs(mag_loss))
+
+        return sc_loss + mag_loss
+
+      spec_loss = stft_loss(x, ref, 25, 5, 1024)
+      spec_loss += stft_loss(x, ref, 50, 10, 2048)
+      spec_loss += stft_loss(x, ref, 10, 2, 512)
+
+      return samp_loss + spec_loss
 
     return x
