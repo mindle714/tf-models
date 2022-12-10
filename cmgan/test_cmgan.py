@@ -13,7 +13,6 @@ m = torch.load("/home/hejung/CMGAN/src/best_ckpt/ckpt")
 import numpy as np
 _in = np.reshape(pcm, [1, -1])
 _tmp = model(_in)
-print(_tmp)
 
 def load_dildense(prefix, _model):
   for i in range(len(_model.convs)):
@@ -186,16 +185,17 @@ def load_tscnet(prefix, _model):
 
 load_tscnet('', model.tscnet)
 
-print(model(_in))
+res = np.squeeze(model(_in), 0)
+print(res.shape)
+import soundfile
+soundfile.write("test_cmgan.wav", res.astype(np.float32), 16000)
+print(res)
 
 '''
 hejung@speech:~/tf-models/ssl$ python3 test_cmgan.py
-tf.Tensor(
-[[-0.00904491 -0.03413181 -0.03042892 ...  0.10910118  0.1264352
-   0.14365053]], shape=(1, 33342), dtype=float32)
-tf.Tensor(
-[[-0.00291189 -0.00660475 -0.00511546 ...  0.00640525  0.00628492
-   0.00696982]], shape=(1, 33342), dtype=float32)
+(33342,)
+[-0.00183184 -0.00415498 -0.00321808 ...  0.00402947  0.00395377
+  0.00438464]
 
 ssh t2
 pushd ~/CMGAN/src

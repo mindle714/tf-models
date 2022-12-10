@@ -40,21 +40,24 @@ class attention(tf.keras.layers.Layer):
     q = reshape(q)
     k = reshape(k)
     v = reshape(v)
+    # q, k, v[batch * freq, num_heads, time, dim]
     
     scale = self.hdim ** -0.5
-    attn_score = tf.linalg.matmul(q, k, transpose_b=True)
+    #tf.linalg.matmul(q, k, transpose_b=True)
+    attn_score = tf.einsum('bhid,bhjd->bhij', q, k)
     attn_score *= scale
 
     seq = tf.range(tf.shape(x)[-2])
     dist = tf_expd(seq, -1) - tf_expd(seq, 0)
     dist = tf.clip_by_value(dist, - self.max_pemb, self.max_pemb) + self.max_pemb
     rel_pemb = self.rel_pemb(dist)
-    pos_attn = tf.linalg.matmul(tf_expd(q, -2), tf.transpose(rel_pemb, [0, 2, 1]))
-    pos_attn = tf.squeeze(pos_attn, -2) * scale
+    #tf.linalg.matmul(tf_expd(q, -2), tf.transpose(rel_pemb, [0, 2, 1]))
+    pos_attn = tf.einsum('bhnd,nrd->bhnr', q, rel_pemb)
+    pos_attn = pos_attn * scale
     attn_score += pos_attn
 
     attn_probs = tf.nn.softmax(attn_score, -1)
-    ctx = tf.linalg.matmul(attn_probs, v)
+    ctx = tf.einsum('bhij,bhjd->bhid', attn_probs, v) #tf.linalg.matmul(attn_probs, v)
     ctx = tf.transpose(ctx, [0, 2, 1, 3])
     ctx = tf.reshape(ctx,
       tf.concat([tf.shape(ctx)[:-2], [-1]], 0))
@@ -367,11 +370,6 @@ class cmgan(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
     super(cmgan, self).__init__()
 
-    self.layer = 4
-    self.dims = [32, 32, 32, 32]
-    self.ksize = 16
-    self.sublayer = 4
-
     self.n_fft = 400
     self.hop_len = 100
 
@@ -379,9 +377,6 @@ class cmgan(tf.keras.layers.Layer):
     conv_opt = dict(padding='same', use_bias=False)
 
     self.tscnet = tscnet(self.n_fft, self.hop_len)
-
-    self.conv_r = conv1d(self.n_fft//2+1, 3, **conv_opt, name='prj_r')
-    self.conv_i = conv1d(self.n_fft//2+1, 3, **conv_opt, name='prj_i')
   
   def power_compress(self, x):
     mag = tf.math.abs(x)
@@ -423,7 +418,8 @@ class cmgan(tf.keras.layers.Layer):
     x_r, x_i = self.tscnet(x)
     x = self.power_uncompress(x_r, x_i)
 
-    x = tf.signal.inverse_stft(x, window_fn=tf.signal.hamming_window,
+    x = tf.signal.inverse_stft(x, window_fn=tf.signal.inverse_stft_window_fn(
+      forward_window_fn=tf.signal.hamming_window, frame_step=self.hop_len),
       frame_length=self.n_fft, frame_step=self.hop_len, fft_length=self.n_fft)
     x /= c
     x = x[..., self.n_fft//2:self.n_fft//2+x_len]
@@ -449,7 +445,6 @@ class cmgan(tf.keras.layers.Layer):
       spec_loss = stft_loss(x, ref, 25, 5, 1024)
       spec_loss += stft_loss(x, ref, 50, 10, 2048)
       spec_loss += stft_loss(x, ref, 10, 2, 512)
-
       return samp_loss + spec_loss
 
     return x

@@ -26,6 +26,7 @@ parser.add_argument("--val-lr-update", type=float, required=False, default=3)
 parser.add_argument("--output", type=str, required=True) 
 parser.add_argument("--warm-start", type=str, required=False, default=None)
 parser.add_argument("--from-init", action='store_true')
+parser.add_argument("--profile", action='store_true')
 args = parser.parse_args()
 
 import json
@@ -102,8 +103,10 @@ for origin in origins + [os.path.abspath(__file__)]:
 logdir = os.path.join(args.output, "logs")
 log_writer = tf.summary.create_file_writer(logdir)
 log_writer.set_as_default()
-tf.profiler.experimental.start(logdir)
+if args.profile:
+  tf.profiler.experimental.start(logdir)
 
+#@tf.function(jit_compile=True)
 @tf.function
 def run_step(step, pcm, ref, training=True):
   with tf.GradientTape() as tape, log_writer.as_default():
@@ -167,19 +170,23 @@ if args.warm_start is not None:
       opt.apply_gradients(zip(zero_grads, grad_vars))
       opt.set_weights(opt_weight)
 
-_traced_cnt = 10
+_traced_begin = 20; _traced_cnt = 20
 for idx, data in enumerate(dataset):
   idx += init_epoch
   if idx > args.train_step: break
 
-  if _traced_cnt > 0:
-    with tf.profiler.experimental.Trace('train', step_num=idx, _r=1):
-      loss = run_step(tf.cast(idx, tf.int64), data["pcm"], data["ref"])
-    _traced_cnt -= 1
+  if args.profile:
+    if idx > (init_epoch + _traced_begin) and _traced_cnt > 0:
+      with tf.profiler.experimental.Trace('train', step_num=idx, _r=1):
+        loss = run_step(tf.cast(idx, tf.int64), data["pcm"], data["ref"])
+      _traced_cnt -= 1
 
-  elif _traced_cnt == 0:
-    tf.profiler.experimental.stop()
-    _traced_cnt -= 1
+    elif idx > (init_epoch + _traced_begin) and  _traced_cnt == 0:
+      tf.profiler.experimental.stop()
+      _traced_cnt -= 1
+  
+    else:
+      loss = run_step(tf.cast(idx, tf.int64), data["pcm"], data["ref"])
 
   else:
     loss = run_step(tf.cast(idx, tf.int64), data["pcm"], data["ref"])

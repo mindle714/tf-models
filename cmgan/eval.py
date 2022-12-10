@@ -30,65 +30,10 @@ sys.path.insert(0, expdir)
 expname = expdir.split("/")[-1]
 epoch = os.path.basename(args.ckpt).replace(".", "-").split("-")[1]
 
-if expname.startswith("unisat"):
-  import unisat
-  if os.path.dirname(unisat.__file__) != expdir:
-    sys.exit("unisat is loaded from {}".format(unisat.__file__))
-  m = unisat.unisat_unet()
-
-elif expname.startswith("wavlm"):
-  import wavlm
-  if os.path.dirname(wavlm.__file__) != expdir:
-    sys.exit("wavlm is loaded from {}".format(wavlm.__file__))
-  m = wavlm.wavlm_unet()
-
-elif expname.startswith("wav2vec2"):
-  import wav2vec2
-  if os.path.dirname(wav2vec2.__file__) != expdir:
-    sys.exit("wav2vec2 is loaded from {}".format(wav2vec2.__file__))
-  m = wav2vec2.wav2vec2_unet()
-
-elif expname.startswith("hubert"):
-  import hubert
-  if os.path.dirname(hubert.__file__) != expdir:
-    sys.exit("hubert is loaded from {}".format(hubert.__file__))
-  m = hubert.hubert_unet()
-
-elif expname.startswith("data2vec"):
-  import data2vec
-  if os.path.dirname(data2vec.__file__) != expdir:
-    sys.exit("data2vec is loaded from {}".format(data2vec.__file__))
-  m = data2vec.data2vec_unet()
-
-elif expname.startswith("tera"):
-  import tera
-  if os.path.dirname(tera.__file__) != expdir:
-    sys.exit("tera is loaded from {}".format(tera.__file__))
-  m = tera.tera_unet()
-
-elif expname.startswith("mockingjay"):
-  import mockingjay
-  if os.path.dirname(mockingjay.__file__) != expdir:
-    sys.exit("mockingjay is loaded from {}".format(mockingjay.__file__))
-  m = mockingjay.mockingjay_unet()
-
-elif expname.startswith("tffts"):
-  import tffts
-  if os.path.dirname(tffts.__file__) != expdir:
-    sys.exit("tffts is loaded from {}".format(tffts.__file__))
-  m = tffts.tffts_unet()
-
-elif expname.startswith("pasep"):
-  import pasep
-  if os.path.dirname(pasep.__file__) != expdir:
-    sys.exit("pasep is loaded from {}".format(pasep.__file__))
-  m = pasep.pasep_unet()
-
-else:
-  import model
-  if os.path.dirname(model.__file__) != expdir:
-    sys.exit("model is loaded from {}".format(model.__file__))
-  m = model.wav2vec2_unet()
+import cmgan
+if os.path.dirname(cmgan.__file__) != expdir:
+  sys.exit("cmgan is loaded from {}".format(cmgan.__file__))
+m = cmgan.cmgan()
 
 import numpy as np
 _in = np.zeros((1, 32000), dtype=np.float32)
