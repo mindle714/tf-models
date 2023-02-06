@@ -4,3 +4,5 @@ exps/
 pre-exps/
 *.ckpt.*
 eval_output/
+vbank_demand_28
+vbank_demand_28_1s/
