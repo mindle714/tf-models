@@ -1,18 +1,20 @@
 import soundfile
 #pcm, _ = soundfile.read("/home/hejung/speech-commands/TEST_SET/no/97f4c236_nohash_0.wav")
-pcm, _ = soundfile.read("/home/hejung/speech-commands/TEST_SET/up/9e2ce5e3_nohash_2.wav")
+#pcm, _ = soundfile.read("/home/hejung/speech-commands/TEST_SET/up/9e2ce5e3_nohash_2.wav")
+pcm, _ = soundfile.read("/home/hejung/s3prl/s3prl/downstream/speech_commands/dummy_data/train/yes/01d22d03_nohash_0.wav")
 
 import tensorflow as tf
 
 import torch
-m = torch.load("/home/hejung/transformers/examples/pytorch/audio-classification/wav2vec2-base-ft-keyword-spotting/checkpoint-6386/pytorch_model.bin")
+#m = torch.load("/home/hejung/transformers/examples/pytorch/audio-classification/wav2vec2-base-ft-keyword-spotting/checkpoint-6386/pytorch_model.bin")
+m = torch.load("/home/hejung/wav2vec2-base/pytorch_model.bin")
 
 from wav2vec2 import *
 
 model = wav2vec2_seq()
 
 import numpy as np
-_in = np.reshape(pcm, [1, -1, 1])
+_in = np.reshape(pcm, [1, -1])
 _tmp = model(_in)
 
 def load_norm(prefix, e):
@@ -71,7 +73,30 @@ for i, layer in enumerate(model.wav2vec2.enc.layers):
   load_norm('{}.layer_norm'.format(prefix), layer.norm)
   load_norm('{}.final_layer_norm'.format(prefix), layer.out_norm)
 
-load_affine('projector', model.projector)
-load_affine('classifier', model.classifier)
+#load_affine('projector', model.projector)
+#load_affine('classifier', model.classifier)
 
 print(model(_in))
+
+'''
+(venv3.7-tera) hejung@speech:~/tf-models/ssl$ python3 test_wav2vec2.py
+tf.Tensor(
+[[[-0.03795013  0.18967038  0.17773671 ...  0.22049077  0.2822556
+    0.33677945]
+  [-0.00936582  0.41093287 -0.02825753 ...  0.4727972   0.1705111
+    0.26599422]
+  [ 0.06454878  0.18859263 -0.02218433 ...  0.14479631  0.19384265
+    0.2460265 ]
+  ...
+  [-0.1849951   0.14248125 -0.14958894 ...  0.19302145  0.14552265
+    0.27958643]
+  [-0.10210146  0.41023663 -0.08990705 ...  0.0936659   0.1708027
+    0.2306513 ]
+  [ 0.00899731  0.21980184  0.18803358 ...  0.04501326  0.19920312
+    0.35360476]]], shape=(1, 49, 768), dtype=float32)
+
+pushd ~/s3prl/s3prl
+python3 -m pdb run_downstream.py -m train -n ExpName -k /home/hejung/wav2vec2-base/pytorch_model.bin -g /home/hejung/wav2vec2-base/config.json -d speech_commands
+(Pdb) b /home/hejung/venv3.7-tera/lib/python3.7/site-packages/transformers/models/wav2vec2/modeling_wav2vec2.py:1079
+(Pdb) c
+'''

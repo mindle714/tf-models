@@ -2,22 +2,22 @@
 
 #epoch=100000; for exp in unisat_base_v4/ unisat_pre_v4/ \
 #  unisat_pre_v4_sg/ wavlm_base/ wavlm_pre/; do
-epoch=100000; 
-for exp in data2vec_pre_v2_sg data2vec_pre_v2 \
-  unisat_base_v5 unisat_pre_v5_sg/ unisat_pre_v5/ \
-  wavlm_base/ wavlm_pre_sg/ wavlm_pre/ \
-  wav2vec2_pre_v2/ wav2vec2_pre_v2_sg; do
+#epoch=10000;
+for epoch in 5000; do 
+  for exp in tera_4f_v2_lv2_mdelta; do
 
-  if [ -f "$exp-${epoch}.eval" ]; then
-    echo "$exp-${epoch}.eval already exists"
-    continue
-  fi
+    if [ -f "$exp-${epoch}.eval" ]; then
+      echo "$exp-${epoch}.eval already exists"
+      continue
+    fi
 
-  if [ ! -d "exps/$exp/" ]; then
-    echo "exp/$exp/ not exists"
-    continue
-  fi
+    if [ ! -d "exps/$exp/" ]; then
+      echo "exp/$exp/ not exists"
+      continue
+    fi
 
-  CUDA_VISIBLE_DEVICES=-1 python3 eval.py \
-  --ckpt exps/$exp/model-${epoch}.ckpt; 
+    CUDA_VISIBLE_DEVICES=-1 python3 eval.py \
+    --ckpt exps/$exp/model-${epoch}.ckpt & 
+  done
 done
+wait

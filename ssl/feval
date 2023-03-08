@@ -1,84 +1,154 @@
 #!/usr/bin/bash
 
-USAGE="Usage: $0 -e <epoch>"
+USAGE="Usage: $0 -e <epoch> -p <prefix> [-s] [-v]"
 EXAMPLE="($0 -e 10000)"
 
-unset epochs; sep=false
-while getopts ":e:s" opt; do
+unset epochs; sep=false; unset prefs; verbose=false
+while getopts ":e:sp:v" opt; do
   case $opt in
     e) epochs+=("$OPTARG") ;;
     s) sep=true ;;
+    p) prefs+=("$OPTARG") ;;
+    v) verbose=true ;;
     ?) echo "$USAGE"; echo "$EXAMPLE"; exit 2 ;;
   esac
 done
 
+evaldir=results
+
 print_epoch() {
   epoch="$1"
+  pref="$2"
+  kepoch="$(echo $epoch | sed 's/000$/k/g')"
 
-  for eval in *-${epoch}.eval; do
-    if [ "$eval" == "*-${epoch}.eval" ]; then return; fi
+  for eval in ${evaldir}/${pref}*-${epoch}.eval; do
+    if [ "$eval" == "${evaldir}/${pref}*-${epoch}.eval" ]; then return; fi
     if echo $eval | grep -q _sep; then continue; fi
 
-    suf="$(echo $eval | sed 's/\.eval//g' | cut -d- -f1)";
+    suf="$(echo $eval | sed 's/\.eval//g' | cut -d- -f1 | rev | cut -d/ -f1 | rev)";
+    tm="$(stat -c %y $eval | cut -d. -f1 | sed 's/202.-//g' | cut -d: -f-2)"
+
     if ! tail -n1 $eval | grep -q final; then
+      len="$(wc -l $eval | awk '{print $1}')"
       score1="$(cat $eval | awk '{s+=$1} END{print s/NR}')"
       score2="$(cat $eval | awk '{s+=$2} END{print s/NR}')"
-      score3="$(cat $eval | awk '{s+=$3} END{print s/NR}')"
-      score4="$(cat $eval | awk '{s+=$4} END{print s/NR}')"
-      score5="$(cat $eval | awk '{s+=$5} END{print s/NR}')"
-      score6="$(cat $eval | awk '{s+=$6} END{print s/NR}')"
-      len="$(wc -l $eval | awk '{print $1}')"
-      printf "%30s \t%.5f\t%.5f\t%.5f\t%.5f\t%.5f\t%.5f   IN PROGRESS(%d)\n" \
-        "$suf($epoch)" $score1 $score2 $score3 $score4 $score5 $score6 $len
+      if $verbose; then
+        score3="$(cat $eval | awk '{s+=$3} END{print s/NR}')"
+        score4="$(cat $eval | awk '{s+=$4} END{print s/NR}')"
+        score5="$(cat $eval | awk '{s+=$5} END{print s/NR}')"
+        score6="$(cat $eval | awk '{s+=$6} END{print s/NR}')"
+        printf "%11s %30s\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\n" \
+          "CONT ($len)" "$suf($kepoch)" $score1 $score2 $score3 $score4 $score5 $score6
+      else
+        printf "%11s %30s\t%.4f\t%.4f\n" \
+          "CONT ($len)" "$suf($kepoch)" $score1 $score2
+      fi
       continue
     fi
-    printf "%30s\t" "$suf($epoch)"; tail -n1 $eval | grep final | sed 's/final: //g' \
-      | awk '{printf "%.5f\t%.5f\t%.5f\t%.5f\t%.5f\t%.5f\n", $1, $2, $3, $4, $5, $6}'
+    printf "%11s %30s\t" "$tm" "$suf($kepoch)"
+    if $verbose; then
+      tail -n1 $eval | grep final | sed 's/final: //g' \
+        | awk '{printf "%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\n", $1, $2, $3, $4, $5, $6}'
+    else
+      tail -n1 $eval | grep final | sed 's/final: //g' \
+        | awk '{printf "%.4f\t%.4f\n", $1, $2}'
+    fi
   done
 }
 
 print_sep_epoch() {
   epoch="$1"
+  pref="$2"
+  kepoch="$(echo $epoch | sed 's/000$/k/g')"
 
-  for eval in *_sep*-${epoch}.eval; do 
-    if [ "$eval" == "*_sep*-${epoch}.eval" ]; then return; fi
+  for eval in ${evaldir}/${pref}*_sep*-${epoch}.eval; do 
+    if [ "$eval" == "${evaldir}/${pref}*_sep*-${epoch}.eval" ]; then return; fi
 
-    suf="$(echo $eval | sed 's/\.eval//g' | cut -d- -f1)";
+    suf="$(echo $eval | sed 's/\.eval//g' | cut -d- -f1 | rev | cut -d/ -f1 | rev)";
+    tm="$(stat -c %y $eval | cut -d. -f1 | sed 's/202.-//g' | cut -d: -f-2)"
+
     if ! tail -n1 $eval | grep -q final; then
       score1="$(cat $eval | awk '{s+=$1} END{print s/NR}')"
       len="$(wc -l $eval | awk '{print $1}')"
-      printf "%30s \t%.5f\tIN PROGRESS(%d)\n" $suf $score1 $len
+      printf "%11s %30s \t%.4f\n" \
+        "CONT ($len)" "$suf($kepoch)" $score1
       continue
     fi
-    printf "%30s\t" "$suf($epoch)"; tail -n1 $eval | grep final | sed 's/final: //g' \
-      | awk '{printf "%.5f\n", $1}'
+    printf "%11s %30s\t" "$tm" "$suf($kepoch)"
+    tail -n1 $eval | grep final | sed 's/final: //g' \
+      | awk '{printf "%.4f\n", $1}'
   done
 }
 
 if ! $sep; then
-  if [ -z ${epochs+x} ]; then
-    epochs="$(ls *.eval | grep -o "\-[0-9]*\.eval" | cut -d- -f2 | cut -d. -f1 | sort -k1 -n | uniq)"
-    printf "%30s\tPESQ    STOI    CSIG    CBAK    COVL    SSNR\n" ""
-    for epoch in $epochs; do
-      print_epoch $epoch
-    done
+  if $verbose; then
+    printf "%42s\tPESQ    STOI    CSIG    CBAK    COVL    SSNR\n" ""
   else
-    printf "%30s\tPESQ    STOI    CSIG    CBAK    COVL    SSNR\n" ""
-    for epoch in "${epochs[@]}"; do
-      print_epoch $epoch
-    done
+    printf "%42s\tPESQ    STOI\n" ""
   fi
-else
+
   if [ -z ${epochs+x} ]; then
-    epochs="$(ls *.eval | grep -o "\-[0-9]*\.eval" | cut -d- -f2 | cut -d. -f1 | sort -k1 -n | uniq)"
-    printf "%30s\tSI-SNR\n" ""
-    for epoch in $epochs; do
-      print_sep_epoch $epoch
-    done
+    if [ -z ${prefs+x} ]; then
+      epochs="$(ls ${evaldir}/*.eval 2> /dev/null | grep -o "\-[0-9]*\.eval" | cut -d- -f2 | cut -d. -f1 | sort -k1 -n | uniq)"
+      for epoch in $epochs; do
+        print_epoch $epoch ""
+      done
+
+    else
+      for pref in "${prefs[@]}"; do
+        epochs="$(ls ${evaldir}/${pref}*.eval 2> /dev/null | grep -o "\-[0-9]*\.eval" | cut -d- -f2 | cut -d. -f1 | sort -k1 -n | uniq)"
+        for epoch in $epochs; do
+          print_epoch $epoch "$pref"
+        done
+      done
+    fi
+
   else
-    printf "%30s\tSI-SNR\n" ""
-    for epoch in "${epochs[@]}"; do
-      print_sep_epoch $epoch
-    done
+    if [ -z ${prefs+x} ]; then
+      for epoch in "${epochs[@]}"; do
+        print_epoch $epoch ""
+      done
+
+    else
+      for pref in "${prefs[@]}"; do
+        for epoch in "${epochs[@]}"; do
+          print_epoch $epoch "$pref"
+        done
+      done
+    fi
+  fi
+
+else
+  printf "%30s\tSI-SNR\n" ""
+
+  if [ -z ${epochs+x} ]; then
+    if [ -z ${prefs+x} ]; then
+      epochs="$(ls ${evaldir}/*.eval 2> /dev/null | grep -o "\-[0-9]*\.eval" | cut -d- -f2 | cut -d. -f1 | sort -k1 -n | uniq)"
+      for epoch in $epochs; do
+        print_sep_epoch $epoch ""
+      done
+
+    else
+      for pref in "${prefs[@]}"; do
+        epochs="$(ls ${evaldir}/${pref}*.eval 2> /dev/null | grep -o "\-[0-9]*\.eval" | cut -d- -f2 | cut -d. -f1 | sort -k1 -n | uniq)"
+        for epoch in $epochs; do
+          print_sep_epoch $epoch "$pref"
+        done
+      done
+    fi
+
+  else
+    if [ -z ${prefs+x} ]; then
+      for epoch in "${epochs[@]}"; do
+        print_sep_epoch $epoch ""
+      done
+
+    else
+      for pref in "${prefs[@]}"; do
+        for epoch in "${epochs[@]}"; do
+          print_sep_epoch $epoch "$pref"
+        done
+      done
+    fi
   fi
 fi
