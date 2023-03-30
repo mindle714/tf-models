@@ -4,9 +4,24 @@ from spec_ops import *
 
 import librosa
 import gammatone
+import cqt
 
 tf_sum = tf.math.reduce_sum
 tf_expd = tf.expand_dims
+
+def pow_to_db(e, eps=1e-10):
+  return tf.math.log(e + 1e-10)
+
+def minmax_norm(e):
+  e_trans = tf.transpose(e, [3, 0, 1, 2])
+  e_trans = tf.reshape(e_trans, [tf.shape(e_trans)[0], -1])
+  e_max = tf.math.reduce_max(e_trans, -1)
+  e_min = tf.math.reduce_min(e_trans, -1)
+
+  e_norm = e - (e_max + e_min) / 2
+  e_norm /= (e_max - e_min)
+  e_norm += 0.5
+  return e_norm
 
 class patchemb(tf.keras.layers.Layer):
   def __init__(self, hdim = 768, *args, **kwargs):
@@ -14,13 +29,13 @@ class patchemb(tf.keras.layers.Layer):
     super(patchemb, self).__init__()
 
   def build(self, input_shape):
-    self.proj = conv2d(self.hdim, (16, 16), strides=(16, 16))
+    #self.proj = conv2d(self.hdim, (16, 16), strides=(16, 16))
     self.cls_token = self.add_weight(shape=[1, 1, self.hdim], trainable=True, name='cls_token')
 
   def call(self, inputs, training=None):
     x = inputs
 
-    x = self.proj(x)
+    #x = self.proj(x)
     x = tf.transpose(x, [0, 3, 1, 2])
     x = tf.reshape(x, [tf.shape(x)[0], tf.shape(x)[1], -1])
     x = tf.transpose(x, [0, 2, 1])
@@ -181,7 +196,8 @@ class beit(tf.keras.layers.Layer):
 
   def build(self, input_shape):
     self.pemb = patchemb()
-    self.enc = encoder([input_shape[1]//16, input_shape[2]//16])
+#    self.enc = encoder([input_shape[1]//16, input_shape[2]//16])
+    self.enc = encoder([input_shape[1], input_shape[2]])
   
   def call(self, inputs, training=None):
     x = inputs
@@ -202,9 +218,10 @@ class beit_seq(tf.keras.layers.Layer):
     return self.beit(x)
 
 class beit_unet(tf.keras.layers.Layer):
-  def __init__(self, *args, **kwargs):
+  def __init__(self, in_types=[1,2,3], *args, **kwargs):
     super(beit_unet, self).__init__()
 
+    self.in_types = in_types
     self.sr = 16000
     self.n_fft = 400
     self.hop_len = 80
@@ -219,10 +236,24 @@ class beit_unet(tf.keras.layers.Layer):
     self.gm_fb = gammatone.gammatone(sr=self.sr, n_fft=self.n_fft, n_bins=128)
 
     self.beit = beit(self.n_fft, self.hop_len)
+    in_dim = len(self.in_types)
 
-    self.up_convs = [
-      conv2dtrans(dim, (2, 2), strides=(2, 2)) for dim in [256, 64, 16, 1]
-    ]
+    self.down_convs = list(zip(
+      [conv2d(dim, (2, 2), strides=(2, 2)) for dim in [in_dim, 16, 64, 256]],
+      [[
+        conv2d(None, 4, strides=1, padding='same') for _ in range(2)
+      ] for dim in [in_dim, 16, 64, 256]]
+    ))
+
+    self.mid_conv = tf.keras.layers.Dense(768)
+    self.mid_norm = lnorm()
+
+    self.up_convs = list(zip(
+      [conv2dtrans(dim, (2, 2), strides=(2, 2)) for dim in [256, 64, 16, in_dim]],
+      [[
+        conv2d(None, 4, strides=1, padding='same') for _ in range(2)
+      ] for dim in [256, 64, 16, in_dim]]
+    ))
 
     self.conv_r = conv1d(1, 3, **conv_opt, name='prj_r')
     self.conv_i = conv1d(1, 3, **conv_opt, name='prj_i')
@@ -237,23 +268,37 @@ class beit_unet(tf.keras.layers.Layer):
 
     _in = x
     
+    pcqt_pow = tf_expd(cqt.pcqt(x, sr=self.sr, 
+      hop_length=self.hop_len, n_bins=128, power=2), -1)
+    
     x = tf.signal.stft(x,
       frame_length=self.n_fft, frame_step=self.hop_len, fft_length=self.n_fft)
 
     x_pow = tf.abs(x) ** 2
+
     mel_pow = tf_expd(tf.einsum("...tf,mf->...tm", x_pow, self.mel_fb), -1)
     gm_pow = tf_expd(tf.einsum("...tf,mf->...tm", x_pow, self.gm_fb), -1)
-    x_pow = tf_expd(x_pow, -1)
 
+    pcqt_pow = tf.image.resize(pcqt_pow, tf.shape(x_pow)[1:3])
     mel_pow = tf.image.resize(mel_pow, tf.shape(x_pow)[1:3])
     gm_pow = tf.image.resize(gm_pow, tf.shape(x_pow)[1:3])
 
-    x = tf.concat([x_pow, mel_pow, gm_pow], -1)
+    x_pow = tf_expd(x_pow, -1)
+
+    zero_db = tf.zeros_like(x_pow)
+    x_db = pow_to_db(x_pow)
+    mel_db = pow_to_db(mel_pow)
+    gm_db = pow_to_db(gm_pow)
+    pcqt_db = pow_to_db(pcqt_pow)
+
+    dbs = [zero_db, x_db, mel_db, gm_db, pcqt_db]
+    ins = [dbs[e] for e in self.in_types]
+    x = tf.concat(ins, -1)
 
     fdim = self.n_fft//2 + 1
     x_len = tf.shape(x)[1]
     pad_len = fdim - (x_len % fdim)
-    pad = tf.zeros([tf.shape(x)[0], pad_len, fdim, 3])
+    pad = tf.zeros([tf.shape(x)[0], pad_len, fdim, tf.shape(x)[-1]])
     x_pad = tf.concat([x, pad], 1)
 
     batch_size = tf.shape(x_pad)[0]
@@ -268,6 +313,16 @@ class beit_unet(tf.keras.layers.Layer):
     x_pad = tf.transpose(x_pad, [3, 2, 0, 1])
 
     x = tf.image.resize(x_pad, [224, 224])
+    x = minmax_norm(x)
+
+    encs = []
+    for (down_conv, convs) in self.down_convs:
+      for conv in convs:
+        x = tf.keras.activations.gelu(conv(x)) + x
+      encs.append(x)
+      x = tf.keras.activations.gelu(down_conv(x))
+
+    x = self.mid_norm(self.mid_conv(x))
 
     xs = self.beit(x)
     x = xs[-1]
@@ -276,13 +331,17 @@ class beit_unet(tf.keras.layers.Layer):
     #x = tf.stop_gradient(x)
 
     x = tf.transpose(x, [0, 2, 1])
-    x = x[..., :196]
+    x = x[..., 1:]
     x = tf.reshape(x, [tf.shape(x)[0], tf.shape(x)[1], 14, 14])
     x = tf.transpose(x, [0, 2, 3, 1])
     # x[batch_size, width, height, dim]
 
-    for up_conv in self.up_convs:
+    encs = encs[::-1]
+    for enc, (up_conv, convs) in zip(encs, self.up_convs):
       x = tf.keras.activations.gelu(up_conv(x))
+      x = tf.concat([x, enc], -1)
+      for conv in convs:
+        x = tf.keras.activations.gelu(conv(x)) + x
     
     x = tf.image.resize(x, [fdim, fdim])
 
