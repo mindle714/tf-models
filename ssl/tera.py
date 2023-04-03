@@ -1,6 +1,7 @@
 import tensorflow as tf
 from util import *
 from spec_ops import *
+from mask import mask_tera
 
 tf_sum = tf.math.reduce_sum
 tf_expd = tf.expand_dims
@@ -21,7 +22,7 @@ class inputrep(tf.keras.layers.Layer):
     #self.pos_enc = get_sinusoid_table(self.hidden_size)[:self.seq_len]
     #self.pos_enc = tf_expd(tf.cast(self.pos_enc, tf.float32), 0)
 
-    self.spec_transform = tf.keras.layers.Dense(768, use_bias=True, name="first")
+    self.spec_transform = tf.keras.layers.Dense(768, use_bias=True)
     self.lnorm = lnorm(affine=True, eps=1e-12)
 
   def get_sinusoid_table(self, seq_len, hidden_size):
@@ -51,13 +52,13 @@ class self_attn(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
     self.num_heads = 12
     self.head_dim = 64
-    super(self_attn, self).__init__()
+    super(self_attn, self).__init__(*args, **kwargs)
 
   def build(self, input_shape):
     self.all_head_size = self.num_heads * self.head_dim
-    self.query = tf.keras.layers.Dense(self.all_head_size, use_bias=True, name='query')
-    self.key = tf.keras.layers.Dense(self.all_head_size, use_bias=True, name='key')
-    self.value = tf.keras.layers.Dense(self.all_head_size, use_bias=True, name='value')
+    self.query = tf.keras.layers.Dense(self.all_head_size, use_bias=True)
+    self.key = tf.keras.layers.Dense(self.all_head_size, use_bias=True)
+    self.value = tf.keras.layers.Dense(self.all_head_size, use_bias=True)
   
   def call(self, inputs, training=None):
     x, attn_mask = inputs
@@ -90,7 +91,7 @@ class self_attn(tf.keras.layers.Layer):
 
 class attention(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
-    super(attention, self).__init__()
+    super(attention, self).__init__(*args, **kwargs)
 
   def build(self, input_shape):
     dim = input_shape[0][-1]
@@ -130,191 +131,92 @@ class enclayer(tf.keras.layers.Layer):
     return x
 
 class encoder(tf.keras.layers.Layer):
-  def __init__(self, beta_r, beta_m, *args, **kwargs):
-    super(encoder, self).__init__()
-
-    self.beta_r = beta_r
-    self.beta_m = beta_m
+  def __init__(self, *args, **kwargs):
+    super(encoder, self).__init__(*args, **kwargs)
 
   def build(self, input_shape):
-    self.layers = [enclayer(name="enclayer_{}".format(_)) for _ in range(3)]
-
-    self.factors = [self.add_weight(shape=(),
-      initializer="zeros", name="factor_{}".format(i), trainable=False) \
-      for i in range(len(self.layers))]
-    
-    self.axis = [0, 1]
-    x_shape = input_shape[0]
-    shape = [x_shape[e] for e in range(len(x_shape)) if e not in self.axis]
-
-    self.ref_r = [self.add_weight(shape=shape,
-      initializer="ones", name="ref_r_{}".format(i), trainable=False) \
-      for i in range(len(self.layers))]
-    self.ns_r = [self.add_weight(shape=shape,
-      initializer="ones", name="ns_r_{}".format(i), trainable=False) \
-      for i in range(len(self.layers))]
-
-    self.x_m = [self.add_weight(shape=shape,
-      initializer="zeros", name="x_m_{}".format(i), trainable=False) \
-      for i in range(len(self.layers))]
-    self.ref_m = [self.add_weight(shape=shape,
-      initializer="zeros", name="ref_m_{}".format(i), trainable=False) \
-      for i in range(len(self.layers))]
-    self.ns_m = [self.add_weight(shape=shape,
-      initializer="zeros", name="ns_m_{}".format(i), trainable=False) \
-      for i in range(len(self.layers))]
-    
-    self.moving_avg_step = self.add_weight(shape=(),
-      initializer="zeros", name="step", trainable=False)
-
-  def moving_avg(self, step, e, v, momentum, debias=False):
-    delta = (e - v) * (1. - momentum) 
-    e.assign_sub(delta, use_locking=True)
-
-    if debias:
-      denom = 1. - tf.math.pow(momentum, step)
-      e.assign(e / denom, use_locking=True)
-
-    return delta
+    self.layers = [enclayer() for _ in range(3)]
   
-  def call(self, inputs, training=None, eps=1e-10):
-    _encs = None
-
-    if len(inputs) == 2:
-      x, attn_mask = inputs
-
-    else:
-      x, attn_mask, _encs = inputs
-
-    if training:
-      self.moving_avg_step.assign_add(1, use_locking=True)
+  def call(self, inputs, training=None):
+    x, attn_mask = inputs
 
     encs = []
-    _x = x
-
     for i, layer in enumerate(self.layers):
       encs.append(x)
-
-      if training and (_encs is not None):
-        _axis = self.axis
-        def reshape(e):
-          for ax in _axis:
-            e = tf_expd(e, ax)
-          return e
-
-        mean_x = tf.math.reduce_mean(x, _axis)
-        std_x = tf.math.reduce_std(x, _axis)
-
-        self.moving_avg(
-          self.moving_avg_step, self.x_m[i],
-          mean_x, self.beta_m)
-
-        mean_ref = tf.math.reduce_mean(_encs[i], _axis)
-        std_ref = tf.math.reduce_std(_encs[i], _axis)
-
-        self.moving_avg(
-          self.moving_avg_step, self.ref_r[i],
-          std_ref / (std_x + eps), self.beta_r)
-        self.moving_avg(
-          self.moving_avg_step, self.ref_m[i],
-          mean_ref, self.beta_m)
-
-        ref_r = reshape(self.ref_r[i])
-        ref_d = reshape(self.ref_m[i] - self.ref_r[i] * self.x_m[i])
-
-        norm_x = ref_r * x + ref_d
-        delta = norm_x - x
-      
-        '''
-        mean_ns = tf.math.reduce_mean(_x, _axis)
-        std_ns = tf.math.reduce_std(_x, _axis)
-
-        self.moving_avg(
-          self.moving_avg_step, self.ns_r[i],
-          std_ns / (std_x + eps), self.beta_r)
-        self.moving_avg(
-          self.moving_avg_step, self.ns_m[i],
-          mean_ns, self.beta_m)
-          
-        ns_r = reshape(self.ns_r[i])
-        ns_d = reshape(self.ns_m[i] - self.ns_r[i] * self.x_m[i])
-
-        norm_x = ns_r * x + ns_d
-        delta_ns = norm_x - x
-        '''
-
-        #delta_comb = tf.stop_gradient((delta + delta_ns) / 2.)
-        #delta_comb = tf.stop_gradient(
-        #  self.factors[i] * delta + (1. - self.factors[i]) * delta_ns)
-        #x += self.factors[i] * delta_comb
-        x += self.factors[i] * tf.stop_gradient(delta)
-
       x = layer((x, attn_mask))
-      _x = layer((_x, attn_mask))
-
     encs.append(x)
 
-    if _encs is not None:
-      x_norm = tf.nn.l2_normalize(x, -1)
-      ref_norm = tf.nn.l2_normalize(_encs[-1], -1)
-      sim = tf.math.reduce_sum(x_norm * ref_norm, -1)
-      sim = tf.math.reduce_mean(sim, -1)
-      '''
-      sim = tf.math.reduce_mean(tf.norm(x - _encs[-1], axis=-1), -1)
-      '''
-      return encs, sim
+    return encs
 
-    return encs, None
+def tera_spec(x, n_fft, hop_len):
+  x = _normalize_wav_decibel(x)
+  x = melspec(x, num_mel_bins=80,
+    frame_length=n_fft, frame_step=hop_len, fft_length=n_fft,
+    lower_edge_hertz=0., upper_edge_hertz=8000.)
+
+  return x
 
 class tera(tf.keras.layers.Layer):
-  def __init__(self, n_fft, hop_len, 
-               beta_r=0.999, beta_m=0.9, *args, **kwargs):
+  def __init__(self, n_fft, hop_len, *args, **kwargs):
     super(tera, self).__init__(*args, **kwargs)
-
     self.n_fft = n_fft
     self.hop_len = hop_len
 
-    self.beta_r = beta_r
-    self.beta_m = beta_m
-
   def build(self, input_shape):
     self.fe = inputrep()
-    self.enc = encoder(self.beta_r, self.beta_m)
+    self.enc = encoder()
   
-  def call(self, inputs, training=None):
-    if isinstance(inputs, tuple):
-      x, _encs = inputs
+  def call(self, inputs, training=None, feat=False):
+    x = inputs
 
-    else:
-      x = inputs
-      _encs = None
-
-    x = _normalize_wav_decibel(x)
-    x = melspec(x, num_mel_bins=80,
-      frame_length=self.n_fft, frame_step=self.hop_len, fft_length=self.n_fft,
-      lower_edge_hertz=0., upper_edge_hertz=8000.)
+    if not feat:
+      x = tera_spec(x, self.n_fft, self.hop_len)
+    x_feat = x
     x = self.fe(x)
 
     attn_mask = tf.zeros([1, 1, 1, tf.shape(x)[1]])
-    return self.enc((x, attn_mask, _encs), training=training)
+    x = self.enc((x, attn_mask))
 
-class tera_seq(tf.keras.layers.Layer):
-  def __init__(self, *args, **kwargs):
-    super(tera_seq, self).__init__()
+    return x_feat, x
+
+class pred_head(tf.keras.layers.Layer):
+  def __init__(self, out_dim=80, *args, **kwargs):
+    self.out_dim = out_dim
+    super(pred_head, self).__init__(*args, **kwargs)
 
   def build(self, input_shape):
-    self.tera = tera(400, 160)
+    dim = input_shape[-1]
+    self.dense = tf.keras.layers.Dense(dim)
+    self.lnorm = lnorm(affine=True, eps=1e-12)
+    self.out = tf.keras.layers.Dense(self.out_dim)
   
   def call(self, inputs, training=None):
     x = inputs
-    return self.tera(x)
+
+    x = self.dense(x)
+    x = tf.keras.activations.gelu(x)
+    x = self.lnorm(x)
+    x = self.out(x)
+
+    return x
+
+class tera_seq(tf.keras.layers.Layer):
+  def __init__(self, *args, **kwargs):
+    super(tera_seq, self).__init__(*args, **kwargs)
+
+  def build(self, input_shape):
+    self.tera = tera(400, 160)
+    self.spechead = pred_head()
+  
+  def call(self, inputs, training=None, feat=False):
+    x = inputs
+    x_feat, _x = self.tera(x, feat=feat)
+    x = self.spechead(_x[-1])
+    return x_feat, _x[-1], x
 
 class tera_unet(tf.keras.layers.Layer):
-  def __init__(self, beta_r=0.999, beta_m=0.9, *args, **kwargs):
-    super(tera_unet, self).__init__()
-    
-    self.beta_r = beta_r
-    self.beta_m = beta_m
+  def __init__(self, *args, **kwargs):
+    super(tera_unet, self).__init__(*args, **kwargs)
 
     self.layer = 4
     self.dims = [32, 32, 32, 32]
@@ -330,11 +232,10 @@ class tera_unet(tf.keras.layers.Layer):
   def build(self, input_shape):
     conv_opt = dict(padding='same', use_bias=False)
 
-    self.tera_frozen = tera(self.n_fft, self.hop_len, name='tera_frozen')
-    self.tera = tera(self.n_fft, self.hop_len, self.beta_r, self.beta_m)
+    self.tera = tera_seq()#tera(self.n_fft, self.hop_len)
 
-    self.conv_r = conv1d(self.n_fft//2+1, 3, **conv_opt, name='conv_r')
-    self.conv_i = conv1d(self.n_fft//2+1, 3, **conv_opt, name='conv_i')
+    self.conv_r = conv1d(self.n_fft//2+1, 3, **conv_opt)
+    self.conv_i = conv1d(self.n_fft//2+1, 3, **conv_opt)
   
   def call(self, inputs, training=None):
     if isinstance(inputs, tuple):
@@ -346,14 +247,7 @@ class tera_unet(tf.keras.layers.Layer):
 
     _in = x
 
-    fs = None
-    if ref is not None:
-      fs, _ = self.tera_frozen(ref, training=False)
-      fs = [tf.stop_gradient(f) for f in fs]
-
-    sim = None
-    xs, sim = self.tera((x, fs))
-    x = xs[-1]
+    x_feat, x, _ = self.tera(x)
 
     x = tf.keras.activations.gelu(x)
     #x = tf.stop_gradient(x)
@@ -403,8 +297,17 @@ class tera_unet(tf.keras.layers.Layer):
       return Cr, Ci
 
     if ref is not None:
+      x_mask, mask_label = mask_tera(x_feat)
+      mask_label = tf.cast(mask_label, tf.float32)
+      _, _, seq_out = self.tera(x_mask, feat=True)
+      seq_loss = tf.math.abs(mask_label * (x_feat - seq_out))
+
+      seq_loss = tf.math.reduce_sum(seq_loss, [-1, -2])
+      denom = tf.math.reduce_sum(mask_label, [-1, -2])
+      seq_loss /= (denom + 1e-9)
+
       x = x[..., :tf.shape(ref)[-1]]
-      samp_loss = tf.math.reduce_mean((x - ref) ** 2)
+      samp_loss = tf.math.reduce_mean((x - ref) ** 2, -1)
 
       def stft_loss(x, ref, frame_length, frame_step, fft_length):
         stft_opt = dict(frame_length=frame_length,
@@ -417,7 +320,7 @@ class tera_unet(tf.keras.layers.Layer):
         sc_loss = tf.reduce_mean(sc_loss)
 
         mag_loss = tf.math.log(mag_x + 1e-9) - tf.math.log(mag_ref + 1e-9)
-        mag_loss = tf.reduce_mean(tf.math.abs(mag_loss))
+        mag_loss = tf.reduce_mean(tf.math.abs(mag_loss), [-1, -2])
 
         return sc_loss + mag_loss
 
@@ -429,6 +332,6 @@ class tera_unet(tf.keras.layers.Layer):
       cirm_loss = tf.math.reduce_mean(tf.math.abs(Cr - x_r))
       cirm_loss += tf.math.reduce_mean(tf.math.abs(Ci - x_i))
 
-      return samp_loss + spec_loss, cirm_loss, sim
+      return samp_loss + spec_loss, cirm_loss, seq_loss
 
     return x
