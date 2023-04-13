@@ -84,6 +84,12 @@ elif expname.startswith("pasep"):
     sys.exit("pasep is loaded from {}".format(pasep.__file__))
   m = pasep.pasep_unet()
 
+elif expname.startswith("beit"):
+  import beit
+  if os.path.dirname(beit.__file__) != expdir:
+    sys.exit("beit is loaded from {}".format(beit.__file__))
+  m = beit.beit_unet()
+
 else:
   import model
   if os.path.dirname(model.__file__) != expdir:

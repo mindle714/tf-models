@@ -5,7 +5,7 @@ image = Image.open(requests.get(url, stream=True).raw)
 
 import numpy as np
 image = np.array(image.resize((224, 224), resample=2)).astype(np.float32) / 255.
-#image = image.transpose(2, 0, 1)
+#image = np.array(image).astype(np.float32) / 255.
 
 mean = np.array([0.5, 0.5, 0.5]); std = np.array([0.5, 0.5, 0.5])
 image = (image - mean[None, None, :]) / std[None, None, :]
@@ -27,7 +27,7 @@ model.beit.pemb.proj.set_weights([w.transpose(2, 3, 1, 0), b])
 cls = m['beit.embeddings.cls_token'].cpu().numpy()
 model.beit.pemb.cls_token.assign(cls)
 
-for i in range(12):
+for i in range(len(model.beit.enc.layers)):
   prefix = 'beit.encoder.layer.{}'.format(i) 
   w = m['{}.layernorm_before.weight'.format(prefix)].cpu().numpy()
   b = m['{}.layernorm_before.bias'.format(prefix)].cpu().numpy()
@@ -71,7 +71,9 @@ for i in range(12):
   w = m['{}.lambda_2'.format(prefix)].cpu().numpy()
   model.beit.enc.layers[i].lambda_2.assign(w)
 
-print(model(_in))
+print(model(_in)[-1])
+print(_in.shape)
+print(model(_in)[-1].shape)
 
 '''
 hejung@speech:~/tf-models/ssl/test$ python3 test_beit.py

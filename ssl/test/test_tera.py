@@ -63,7 +63,20 @@ for i in range(3):
   model.tera.enc.layers[i].lnorm.gamma.assign(w)
   model.tera.enc.layers[i].lnorm.beta.assign(b)
 
-print(model(_in)[-1])
+w = m['SpecHead']['dense.weight'].cpu().numpy()
+b = m['SpecHead']['dense.bias'].cpu().numpy()
+model.spechead.dense.set_weights([w.transpose(1,0), b])
+
+w = m['SpecHead']['LayerNorm.weight'].cpu().numpy()
+b = m['SpecHead']['LayerNorm.bias'].cpu().numpy()
+model.spechead.lnorm.gamma.assign(w)
+model.spechead.lnorm.beta.assign(b)
+
+w = m['SpecHead']['output.weight'].cpu().numpy()
+b = m['SpecHead']['output.bias'].cpu().numpy()
+model.spechead.out.set_weights([w.transpose(1,0), b])
+
+print(model(_in))
 
 '''
 (venv3.7-tera) hejung@speech:~/tf-models/ssl$ python3 test_tera.py

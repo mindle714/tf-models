@@ -212,7 +212,23 @@ class tera_seq(tf.keras.layers.Layer):
     x = inputs
     x_feat, _x = self.tera(x, feat=feat)
     x = self.spechead(_x[-1])
-    return x_feat, _x[-1], x
+    return x_feat, _x, x
+
+def stft_loss(x, ref, frame_length, frame_step, fft_length):
+  stft_opt = dict(frame_length=frame_length,
+    frame_step=frame_step, fft_length=fft_length)
+
+  mag_x = tf.math.abs(stft(x, **stft_opt))
+  mag_ref = tf.math.abs(stft(ref, **stft_opt))
+
+  fro_opt = dict(axis=(-2, -1), ord='fro')
+  sc_loss = tf.norm(mag_x - mag_ref, **fro_opt) / (tf.norm(mag_x, **fro_opt) + 1e-9)
+  sc_loss = tf.reduce_mean(sc_loss)
+
+  mag_loss = tf.math.log(mag_x + 1e-9) - tf.math.log(mag_ref + 1e-9)
+  mag_loss = tf.reduce_mean(tf.math.abs(mag_loss), [-1, -2])
+
+  return sc_loss + mag_loss
 
 class tera_unet(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
@@ -247,7 +263,8 @@ class tera_unet(tf.keras.layers.Layer):
 
     _in = x
 
-    x_feat, x, _ = self.tera(x)
+    x_feat, xs, _ = self.tera(x)
+    x = xs[-1]
 
     x = tf.keras.activations.gelu(x)
     #x = tf.stop_gradient(x)
@@ -309,21 +326,6 @@ class tera_unet(tf.keras.layers.Layer):
       x = x[..., :tf.shape(ref)[-1]]
       samp_loss = tf.math.reduce_mean((x - ref) ** 2, -1)
 
-      def stft_loss(x, ref, frame_length, frame_step, fft_length):
-        stft_opt = dict(frame_length=frame_length,
-          frame_step=frame_step, fft_length=fft_length)
-        mag_x = tf.math.abs(stft(x, **stft_opt))
-        mag_ref = tf.math.abs(stft(ref, **stft_opt))
-
-        fro_opt = dict(axis=(-2, -1), ord='fro')
-        sc_loss = tf.norm(mag_x - mag_ref, **fro_opt) / (tf.norm(mag_x, **fro_opt) + 1e-9)
-        sc_loss = tf.reduce_mean(sc_loss)
-
-        mag_loss = tf.math.log(mag_x + 1e-9) - tf.math.log(mag_ref + 1e-9)
-        mag_loss = tf.reduce_mean(tf.math.abs(mag_loss), [-1, -2])
-
-        return sc_loss + mag_loss
-
       spec_loss = stft_loss(x, ref, 25, 5, 1024)
       spec_loss += stft_loss(x, ref, 50, 10, 2048)
       spec_loss += stft_loss(x, ref, 10, 2, 512)
@@ -333,5 +335,56 @@ class tera_unet(tf.keras.layers.Layer):
       cirm_loss += tf.math.reduce_mean(tf.math.abs(Ci - x_i))
 
       return samp_loss + spec_loss, cirm_loss, seq_loss
+
+    return x
+
+class tera_phone(tf.keras.layers.Layer):
+  def __init__(self, *args, **kwargs):
+    super(tera_phone, self).__init__(*args, **kwargs)
+
+    self.n_fft = 400
+    self.hop_len = 160
+
+  def build(self, input_shape):
+    conv_opt = dict(padding='same', use_bias=False)
+
+    self.tera = tera_seq()#tera(self.n_fft, self.hop_len)
+
+    self.proj = tf.keras.layers.Dense(256, use_bias=True)
+    self.linear = tf.keras.layers.Dense(74, use_bias=True)
+  
+  def call(self, inputs, training=None):
+    if isinstance(inputs, tuple) and len(inputs) == 4:
+      x, ref, x_len, ref_len = inputs
+
+    else:
+      x = inputs
+      ref = None
+
+    _in = x
+
+    x_feat, xs, _ = self.tera(x)
+    x = sum(xs)
+
+    x = self.proj(x)
+    # TODO in s3prl, no activation between two linear layers
+    x = self.linear(x)
+
+    if ref is not None:
+      x_mask, mask_label = mask_tera(x_feat)
+      mask_label = tf.cast(mask_label, tf.float32)
+      _, _, seq_out = self.tera(x_mask, feat=True)
+      seq_loss = tf.math.abs(mask_label * (x_feat - seq_out))
+
+      seq_loss = tf.math.reduce_sum(seq_loss, [-1, -2])
+      denom = tf.math.reduce_sum(mask_label, [-1, -2])
+      seq_loss /= (denom + 1e-9)
+
+      ctc_loss = tf.nn.ctc_loss(
+        ref, x, tf.squeeze(ref_len, -1), 
+        tf.tile(tf.shape(x)[-1:], tf.shape(x)[0:1]),#x_len, 
+        logits_time_major=False)
+
+      return ctc_loss, seq_loss
 
     return x
