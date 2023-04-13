@@ -6,11 +6,13 @@ from mask import mask_tera
 tf_sum = tf.math.reduce_sum
 tf_expd = tf.expand_dims
 
+'''
 def _normalize_wav_decibel(wav, target_level=-25):
   rms = (tf.math.reduce_mean(wav**2))**0.5
   scalar = (10 ** (target_level / 20)) / (rms + 1e-10)
   wav = wav * scalar
   return wav
+'''
 
 class inputrep(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
@@ -18,10 +20,7 @@ class inputrep(tf.keras.layers.Layer):
     super(inputrep, self).__init__(*args, **kwargs)
 
   def build(self, input_shape):
-    #self.seq_len = input_shape[1]
-    #self.pos_enc = get_sinusoid_table(self.hidden_size)[:self.seq_len]
-    #self.pos_enc = tf_expd(tf.cast(self.pos_enc, tf.float32), 0)
-
+    self.pos_enc = self.get_sinusoid_table(input_shape[1], self.hidden_size)
     self.spec_transform = tf.keras.layers.Dense(768, use_bias=True)
     self.lnorm = lnorm(affine=True, eps=1e-12)
 
@@ -42,9 +41,9 @@ class inputrep(tf.keras.layers.Layer):
   def call(self, inputs, training=None):
     x = inputs
 
-    pos_enc = self.get_sinusoid_table(tf.shape(x)[1], self.hidden_size) 
+    #pos_enc = self.get_sinusoid_table(tf.shape(x)[1], self.hidden_size) 
 
-    x = self.spec_transform(x) + pos_enc
+    x = self.spec_transform(x) + self.pos_enc
     x = self.lnorm(x)
     return x
 
@@ -59,6 +58,7 @@ class self_attn(tf.keras.layers.Layer):
     self.query = tf.keras.layers.Dense(self.all_head_size, use_bias=True)
     self.key = tf.keras.layers.Dense(self.all_head_size, use_bias=True)
     self.value = tf.keras.layers.Dense(self.all_head_size, use_bias=True)
+    self.inv_hdim = 1 / np.sqrt(self.head_dim)
   
   def call(self, inputs, training=None):
     x, attn_mask = inputs
@@ -78,7 +78,7 @@ class self_attn(tf.keras.layers.Layer):
     v = reshape(mixed_v)
 
     attn_score = tf.linalg.matmul(q, k, transpose_b=True)
-    attn_score /= np.sqrt(self.head_dim)
+    attn_score *= self.inv_hdim #/= np.sqrt(self.head_dim)
     attn_score += attn_mask
 
     attn_probs = tf.nn.softmax(attn_score, -1)
@@ -148,6 +148,7 @@ class encoder(tf.keras.layers.Layer):
 
     return encs
 
+'''
 def tera_spec(x, n_fft, hop_len):
   x = _normalize_wav_decibel(x)
   x = melspec(x, num_mel_bins=80,
@@ -155,6 +156,7 @@ def tera_spec(x, n_fft, hop_len):
     lower_edge_hertz=0., upper_edge_hertz=8000.)
 
   return x
+'''
 
 class tera(tf.keras.layers.Layer):
   def __init__(self, n_fft, hop_len, *args, **kwargs):
@@ -166,11 +168,9 @@ class tera(tf.keras.layers.Layer):
     self.fe = inputrep()
     self.enc = encoder()
   
-  def call(self, inputs, training=None, feat=False):
+  def call(self, inputs, training=None):
     x = inputs
 
-    if not feat:
-      x = tera_spec(x, self.n_fft, self.hop_len)
     x_feat = x
     x = self.fe(x)
 
@@ -208,9 +208,9 @@ class tera_seq(tf.keras.layers.Layer):
     self.tera = tera(400, 160)
     self.spechead = pred_head()
   
-  def call(self, inputs, training=None, feat=False):
+  def call(self, inputs, training=None):
     x = inputs
-    x_feat, _x = self.tera(x, feat=feat)
+    x_feat, _x = self.tera(x)
     x = self.spechead(_x[-1])
     return x_feat, _x, x
 
@@ -230,114 +230,6 @@ def stft_loss(x, ref, frame_length, frame_step, fft_length):
 
   return sc_loss + mag_loss
 
-class tera_unet(tf.keras.layers.Layer):
-  def __init__(self, *args, **kwargs):
-    super(tera_unet, self).__init__(*args, **kwargs)
-
-    self.layer = 4
-    self.dims = [32, 32, 32, 32]
-    self.ksize = 16
-    self.sublayer = 4
-
-    self.n_fft = 400
-    self.hop_len = 160
-
-    self.k = 10
-    self.c = 0.1
-
-  def build(self, input_shape):
-    conv_opt = dict(padding='same', use_bias=False)
-
-    self.tera = tera_seq()#tera(self.n_fft, self.hop_len)
-
-    self.conv_r = conv1d(self.n_fft//2+1, 3, **conv_opt)
-    self.conv_i = conv1d(self.n_fft//2+1, 3, **conv_opt)
-  
-  def call(self, inputs, training=None):
-    if isinstance(inputs, tuple):
-      x, ref = inputs
-
-    else:
-      x = inputs
-      ref = None
-
-    _in = x
-
-    x_feat, xs, _ = self.tera(x)
-    x = xs[-1]
-
-    x = tf.keras.activations.gelu(x)
-    #x = tf.stop_gradient(x)
-
-    x_r = tf.clip_by_value(self.conv_r(x), -self.k, self.k)
-    x_i = tf.clip_by_value(self.conv_i(x), -self.k, self.k)
-      
-    in_pad = tf.pad(_in, tf.constant(
-      [[0, 0], [self.n_fft//2, self.n_fft//2]]), mode='reflect')
-
-    Y = tf.signal.stft(in_pad, 
-      frame_length=self.n_fft, frame_step=self.hop_len, fft_length=self.n_fft)
-    Yr = tf.math.real(Y); Yi = tf.math.imag(Y)
-
-    Mr = -1. / self.c * tf.math.log(tf.nn.relu((self.k - x_r) / (self.k + x_r)) + 1e-10)
-    Mi = -1. / self.c * tf.math.log(tf.nn.relu((self.k - x_i) / (self.k + x_i)) + 1e-10)
-
-    Sr = (Mr * Yr) - (Mi * Yi)
-    Si = (Mr * Yi) + (Mi * Yr)
-    x = tf.signal.inverse_stft(tf.complex(Sr, Si),
-      frame_length=self.n_fft, frame_step=self.hop_len, fft_length=self.n_fft)
-    x = x[..., self.n_fft//2:self.n_fft//2+tf.shape(_in)[1]]
-
-    def get_cirm(Yr, Yi, ref):
-      ref_pad = tf.pad(ref, tf.constant(
-        [[0, 0], [self.n_fft//2, self.n_fft//2]]), mode='reflect')
-
-      S = tf.signal.stft(ref_pad,
-        frame_length=self.n_fft, frame_step=self.hop_len, fft_length=self.n_fft)
-      Sr = tf.math.real(S); Si = tf.math.imag(S)
-
-      M_denom = (Yr * Yr) + (Yi * Yi)
-      Mr_num = (Yr * Sr) + (Yi * Si)
-      Mr = Mr_num / (M_denom + 1e-10)
-
-      Mi_num = (Yr * Si) - (Yi * Sr)
-      Mi = Mi_num / (M_denom + 1e-10)
-
-      Cr_exp = tf.math.exp(-self.c * Mr)
-      #Cr = self.k * ((1 - Cr_exp) / (1 + Cr_exp))
-      Cr = self.k * (-1. + 2. * tf.math.reciprocal_no_nan(1 + Cr_exp))
-        
-      Ci_exp = tf.math.exp(-self.c * Mi)
-      #Ci = self.k * ((1 - Ci_exp) / (1 + Ci_exp))
-      Ci = self.k * (-1. + 2. * tf.math.reciprocal_no_nan(1 + Ci_exp))
-
-      return Cr, Ci
-
-    if ref is not None:
-      x_mask, mask_label = mask_tera(x_feat)
-      mask_label = tf.cast(mask_label, tf.float32)
-      _, _, seq_out = self.tera(x_mask, feat=True)
-      seq_loss = tf.math.abs(mask_label * (x_feat - seq_out))
-
-      seq_loss = tf.math.reduce_sum(seq_loss, [-1, -2])
-      denom = tf.math.reduce_sum(mask_label, [-1, -2])
-      seq_loss /= (denom + 1e-9)
-
-      x = x[..., :tf.shape(ref)[-1]]
-      samp_loss = tf.math.reduce_mean((x - ref) ** 2, -1)
-
-      spec_loss = stft_loss(x, ref, 25, 5, 1024)
-      spec_loss += stft_loss(x, ref, 50, 10, 2048)
-      spec_loss += stft_loss(x, ref, 10, 2, 512)
-
-      Cr, Ci = get_cirm(Yr, Yi, ref)
-      cirm_loss = tf.math.reduce_mean(tf.math.abs(Cr - x_r))
-      cirm_loss += tf.math.reduce_mean(tf.math.abs(Ci - x_i))
-
-      return samp_loss + spec_loss, cirm_loss, seq_loss
-
-    return x
-
 class tera_phone(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
     super(tera_phone, self).__init__(*args, **kwargs)
@@ -353,7 +245,7 @@ class tera_phone(tf.keras.layers.Layer):
     self.proj = tf.keras.layers.Dense(256, use_bias=True)
     self.linear = tf.keras.layers.Dense(74, use_bias=True)
   
-  def call(self, inputs, training=None):
+  def call(self, inputs, training=None, ssl_loss=False):
     if isinstance(inputs, tuple) and len(inputs) == 4:
       x, ref, x_len, ref_len = inputs
 
@@ -371,19 +263,22 @@ class tera_phone(tf.keras.layers.Layer):
     x = self.linear(x)
 
     if ref is not None:
-      x_mask, mask_label = mask_tera(x_feat)
-      mask_label = tf.cast(mask_label, tf.float32)
-      _, _, seq_out = self.tera(x_mask, feat=True)
-      seq_loss = tf.math.abs(mask_label * (x_feat - seq_out))
+      seq_loss = 0.
+      if ssl_loss:
+        x_mask, mask_label = mask_tera(x_feat)
+        mask_label = tf.cast(mask_label, tf.float32)
+        _, _, seq_out = self.tera(x_mask)
+        seq_loss = tf.math.abs(mask_label * (x_feat - seq_out))
 
-      seq_loss = tf.math.reduce_sum(seq_loss, [-1, -2])
-      denom = tf.math.reduce_sum(mask_label, [-1, -2])
-      seq_loss /= (denom + 1e-9)
+        seq_loss = tf.math.reduce_sum(seq_loss, [-1, -2])
+        denom = tf.math.reduce_sum(mask_label, [-1, -2])
+        seq_loss /= (denom + 1e-9)
 
       ctc_loss = tf.nn.ctc_loss(
         ref, x, tf.squeeze(ref_len, -1), 
-        tf.tile(tf.shape(x)[-1:], tf.shape(x)[0:1]),#x_len, 
-        logits_time_major=False)
+        tf.squeeze(x_len, -1), #tf.tile(tf.shape(x)[-1:], tf.shape(x)[0:1]),#x_len, 
+        logits_time_major=False,
+        blank_index=1)
 
       return ctc_loss, seq_loss
 
