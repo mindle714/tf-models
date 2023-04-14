@@ -171,13 +171,12 @@ class tera(tf.keras.layers.Layer):
   def call(self, inputs, training=None):
     x = inputs
 
-    x_feat = x
     x = self.fe(x)
 
     attn_mask = tf.zeros([1, 1, 1, tf.shape(x)[1]])
     x = self.enc((x, attn_mask))
 
-    return x_feat, x
+    return x
 
 class pred_head(tf.keras.layers.Layer):
   def __init__(self, out_dim=80, *args, **kwargs):
@@ -210,9 +209,9 @@ class tera_seq(tf.keras.layers.Layer):
   
   def call(self, inputs, training=None):
     x = inputs
-    x_feat, _x = self.tera(x)
+    _x = self.tera(x)
     x = self.spechead(_x[-1])
-    return x_feat, _x, x
+    return _x, x
 
 def stft_loss(x, ref, frame_length, frame_step, fft_length):
   stft_opt = dict(frame_length=frame_length,
@@ -253,10 +252,24 @@ class tera_phone(tf.keras.layers.Layer):
       x = inputs
       ref = None
 
-    _in = x
+    x_feat = x
+    '''
+    split = 4
 
-    x_feat, xs, _ = self.tera(x)
+    _x_len = tf.shape(x)[1]
+    x = tf.pad(x, [[0,0], [0, split - _x_len % split], [0,0]])
+    _xs = tf.split(x, split, axis=1)
+    x = tf.concat(_xs, 0)
+    '''
+
+    xs, _ = self.tera(x)
     x = sum(xs)
+
+    '''
+    _xs = tf.split(x, split, axis=0)
+    x = tf.concat(_xs, 1)
+    x = tf.slice(x, [0, 0, 0], [-1, _x_len, -1])
+    '''
 
     x = self.proj(x)
     # TODO in s3prl, no activation between two linear layers
@@ -275,10 +288,12 @@ class tera_phone(tf.keras.layers.Layer):
         seq_loss /= (denom + 1e-9)
 
       ctc_loss = tf.nn.ctc_loss(
-        ref, x, tf.squeeze(ref_len, -1), 
-        tf.squeeze(x_len, -1), #tf.tile(tf.shape(x)[-1:], tf.shape(x)[0:1]),#x_len, 
+#        tf.sparse.from_dense(tf.cast(ref, tf.int32)), x, 
+        tf.cast(ref, tf.int32), x, 
+        tf.squeeze(tf.cast(ref_len, tf.int32), -1), 
+        tf.squeeze(tf.cast(x_len, tf.int32), -1), 
         logits_time_major=False,
-        blank_index=1)
+        blank_index=0)
 
       return ctc_loss, seq_loss
 

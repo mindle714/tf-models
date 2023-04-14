@@ -12,6 +12,7 @@ import os
 import sys
 import json
 from stat import S_IREAD, S_IRGRP, S_IROTH, S_IWUSR
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 
 args_file = os.path.join(args.output, "ARGS")
 if os.path.isdir(args.output):
@@ -74,6 +75,7 @@ import copy
 import soundfile
 import librosa
 import tqdm
+import parse_data
 
 def get_feats(pcm, txt): 
   if pcm.shape[0] > args.samp_len: return None
@@ -86,13 +88,25 @@ def get_feats(pcm, txt):
   _pcm = pad(pcm, args.samp_len, 0)
   _txt = pad(np.array(txt), max_text_len, 0)
 
-  pcm_feat = tf.train.Feature(float_list=tf.train.FloatList(value=_pcm))
+  _dict = {'pcm': np.expand_dims(_pcm, 0).astype(np.float32), 'pcm_len':pcm_len}
+  _spec_dict = parse_data.conv_spec(_dict)
+  _spec = np.squeeze(_spec_dict['spec'], 0)
+  _spec = np.reshape(_spec, [-1])
+  spec_len = _spec_dict['spec_len']
+
+#  pcm_feat = tf.train.Feature(float_list=tf.train.FloatList(value=_pcm))
+  spec_feat = tf.train.Feature(float_list=tf.train.FloatList(value=_spec))
   txt_feat = tf.train.Feature(int64_list=tf.train.Int64List(value=_txt))
-  pcm_len_feat = tf.train.Feature(int64_list=tf.train.Int64List(value=[pcm_len]))
+#  pcm_len_feat = tf.train.Feature(int64_list=tf.train.Int64List(value=[pcm_len]))
+  spec_len_feat = tf.train.Feature(int64_list=tf.train.Int64List(value=[spec_len]))
   txt_len_feat = tf.train.Feature(int64_list=tf.train.Int64List(value=[txt_len]))
 
-  feats = {'pcm': pcm_feat, 'txt': txt_feat, 
-          'pcm_len': pcm_len_feat, 'txt_len': txt_len_feat}
+#  feats = {'pcm': pcm_feat, 'txt': txt_feat, 
+#          'pcm_len': pcm_len_feat, 'txt_len': txt_len_feat}
+  feats = {
+    'spec': spec_feat, 'txt': txt_feat, 
+    'spec_len': spec_len_feat, 'txt_len': txt_len_feat
+  }
   ex = tf.train.Example(features=tf.train.Features(feature=feats))
   return ex.SerializeToString()
 
@@ -101,7 +115,7 @@ writers = [tf.io.TFRecordWriter(os.path.join(
     args.output, "train-{}.tfrecord".format(idx))) for idx in range(num_chunks)]
 
 chunk_idx = 0; chunk_lens = [0 for _ in range(num_chunks)]
-num_process = 8
+num_process = 16
 
 for bidx in tqdm.tqdm(range(len(train_list)//num_process+1)):
   blist = train_list[bidx*num_process:(bidx+1)*num_process]

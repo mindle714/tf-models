@@ -36,6 +36,7 @@ parser.add_argument("--period-ssl-decay", type=float, required=False, default=1.
 parser.add_argument("--output", type=str, required=True) 
 parser.add_argument("--warm-start", type=str, required=False, default=None)
 parser.add_argument("--from-init", action='store_true')
+parser.add_argument("--profile", action='store_true')
 args = parser.parse_args()
 
 if args.begin_ssl > args.end_ssl:
@@ -155,6 +156,8 @@ import datetime
 logdir = os.path.join(args.output, "logs")
 log_writer = tf.summary.create_file_writer(logdir)
 log_writer.set_as_default()
+if args.profile:
+  tf.profiler.experimental.start(logdir)
 
 @tf.function
 def run_step(step, spec, txt, spec_len, txt_len, training=True, accum=False):
@@ -251,6 +254,7 @@ if args.warm_start is not None:
       opt.apply_gradients(zip(zero_grads, grad_vars))
       opt.set_weights(opt_weight)
 
+_traced_begin = 2; _traced_cnt = 10
 for idx, data in enumerate(dataset):
   idx += init_epoch
   if idx > args.train_step: break
@@ -258,10 +262,31 @@ for idx, data in enumerate(dataset):
   # TODO not using (idx+1) to call apply_grads in initial run_step()
   accum = not (idx % args.accum_step == 0)
 
-  loss, sloss, sw = run_step(
-    tf.cast(idx, tf.int64),
-    data["spec"], data["txt"], data["spec_len"], data["txt_len"],
-    accum=accum)
+  if args.profile:
+    if idx > (init_epoch + _traced_begin) and _traced_cnt > 0:
+      with tf.profiler.experimental.Trace('train', step_num=idx, _r=1):
+        loss, sloss, sw = run_step(
+          tf.cast(idx, tf.int64),
+          data["spec"], data["txt"], data["spec_len"], data["txt_len"],
+          accum=accum)
+      _traced_cnt -= 1
+
+    elif idx > (init_epoch + _traced_begin) and  _traced_cnt == 0:
+      tf.profiler.experimental.stop()
+      _traced_cnt -= 1
+
+    else:
+        loss, sloss, sw = run_step(
+          tf.cast(idx, tf.int64),
+          data["spec"], data["txt"], data["spec_len"], data["txt_len"],
+          accum=accum)
+
+  else:
+    loss, sloss, sw = run_step(
+      tf.cast(idx, tf.int64),
+      data["spec"], data["txt"], data["spec_len"], data["txt_len"],
+      accum=accum)
+
   log_writer.flush()
 
   if idx > init_epoch and idx % args.eval_step == 0:
