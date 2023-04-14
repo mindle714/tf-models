@@ -4,8 +4,8 @@ import numpy as np
 import tensorflow as tf
 
 seed = 1234
-os.environ['PYTHONHASHSEED'] = str(seed)
-os.environ['TF_DETERMINISTIC_OPS'] = '1'
+#os.environ['PYTHONHASHSEED'] = str(seed)
+#os.environ['TF_DETERMINISTIC_OPS'] = '1'
 random.seed(seed)
 np.random.seed(seed)
 tf.random.set_seed(seed)
@@ -15,6 +15,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--tfrec", type=str, required=True) 
 parser.add_argument("--val-tfrec", type=str, required=False, default=None)
 parser.add_argument("--batch-size", type=int, required=False, default=2) 
+parser.add_argument("--accum-step", type=int, required=False, default=1)
 parser.add_argument("--eval-step", type=int, required=False, default=100) 
 parser.add_argument("--save-step", type=int, required=False, default=10000) 
 parser.add_argument("--val-step", type=int, required=False, default=5000) 
@@ -136,6 +137,11 @@ opt = tf.keras.optimizers.Adam(learning_rate=lr)
 import tera
 m = tera.tera_phone()
 
+if args.accum_step > 1:
+  _in = np.zeros((args.batch_size, samp_len), dtype=np.float32)
+  _ = m(_in)
+  accum_grads = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights]
+
 specs = [val.__spec__ for name, val in sys.modules.items() \
   if isinstance(val, types.ModuleType) and not ('_main_' in name)]
 origins = [spec.origin for spec in specs if spec is not None]
@@ -151,9 +157,10 @@ log_writer = tf.summary.create_file_writer(logdir)
 log_writer.set_as_default()
 
 @tf.function
-def run_step(step, pcm, txt, pcm_len, txt_len, training=True):
+def run_step(step, spec, txt, spec_len, txt_len, training=True, accum=False):
   with tf.GradientTape() as tape, log_writer.as_default():
-    loss, sloss = m((pcm, txt, pcm_len, txt_len), training=training)
+    loss, sloss = m((spec, txt, spec_len, txt_len), 
+      training=training, ssl_loss = (not (args.ssl_weight == 0)))
     loss = tf.math.reduce_mean(loss)
     tf.summary.scalar("loss", loss, step=step)
     sloss = tf.where(sloss > args.ssl_margin, sloss, tf.zeros_like(sloss))
@@ -177,11 +184,24 @@ def run_step(step, pcm, txt, pcm_len, txt_len, training=True):
 
   if training:
     weights = m.trainable_weights
-    #weights = [e for e in weights if 'pred_head' not in e.name]
-    #assert len(m.trainable_weights) - len(weights) == 6
     grads = tape.gradient(total_loss, weights)
     grads, _ = tf.clip_by_global_norm(grads, 5.)
-    opt.apply_gradients(zip(grads, weights))
+            
+    if args.accum_step == 1:
+      opt.apply_gradients(zip(grads, weights))
+            
+    else:
+      for idx, grad in enumerate(grads):
+        accum_grads[idx].assign_add(grad)
+
+      if not accum:
+        for idx, grad in enumerate(grads):
+          accum_grads[idx].assign(accum_grads[idx]/args.accum_step)
+
+        opt.apply_gradients(zip(accum_grads, m.trainable_weights))
+                
+        for idx, grad in enumerate(grads):
+          accum_grads[idx].assign(tf.zeros_like(grad))
 
   return loss, sloss, ssl_weight
 
@@ -234,10 +254,14 @@ if args.warm_start is not None:
 for idx, data in enumerate(dataset):
   idx += init_epoch
   if idx > args.train_step: break
+            
+  # TODO not using (idx+1) to call apply_grads in initial run_step()
+  accum = not (idx % args.accum_step == 0)
 
   loss, sloss, sw = run_step(
     tf.cast(idx, tf.int64),
-    data["pcm"], data["txt"], data["pcm_len"], data["txt_len"])
+    data["spec"], data["txt"], data["spec_len"], data["txt_len"],
+    accum=accum)
   log_writer.flush()
 
   if idx > init_epoch and idx % args.eval_step == 0:
@@ -252,7 +276,7 @@ for idx, data in enumerate(dataset):
     val_loss = 0; num_val = 0
     for val_data in val_dataset:
       val_loss += run_step(tf.cast(idx, tf.int64),
-        val_data["pcm"], val_data["ref"], training=False)
+        val_data["spec"], val_data["ref"], training=False)
       num_val += 1
     val_loss /= num_val
 
