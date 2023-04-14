@@ -2,6 +2,7 @@ import tensorflow as tf
 from util import *
 from spec_ops import *
 from mask import mask_tera
+from tf_seq2seq_losses import classic_ctc_loss as _ctc_loss
 
 tf_sum = tf.math.reduce_sum
 tf_expd = tf.expand_dims
@@ -287,12 +288,12 @@ class tera_phone(tf.keras.layers.Layer):
         denom = tf.math.reduce_sum(mask_label, [-1, -2])
         seq_loss /= (denom + 1e-9)
 
-      ctc_loss = tf.nn.ctc_loss(
+      ctc_loss = _ctc_loss(#tf.nn.ctc_loss(
 #        tf.sparse.from_dense(tf.cast(ref, tf.int32)), x, 
         tf.cast(ref, tf.int32), x, 
         tf.squeeze(tf.cast(ref_len, tf.int32), -1), 
         tf.squeeze(tf.cast(x_len, tf.int32), -1), 
-        logits_time_major=False,
+#        logits_time_major=False,
         blank_index=0)
 
       return ctc_loss, seq_loss
