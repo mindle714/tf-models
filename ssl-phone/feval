@@ -1,0 +1,70 @@
+#!/usr/bin/bash
+
+USAGE="Usage: $0 -e <epoch> -p <prefix> [-s] [-v]"
+EXAMPLE="($0 -e 10000)"
+
+unset epochs; unset prefs;
+while getopts ":e:p:" opt; do
+  case $opt in
+    e) epochs+=("$OPTARG") ;;
+    p) prefs+=("$OPTARG") ;;
+    ?) echo "$USAGE"; echo "$EXAMPLE"; exit 2 ;;
+  esac
+done
+
+evaldir=results
+
+print_epoch() {
+  epoch="$1"
+  pref="$2"
+  kepoch="$(echo $epoch | sed 's/000$/k/g')"
+
+  for eval in ${evaldir}/${pref}*-${epoch}.eval; do
+    if [ "$eval" == "${evaldir}/${pref}*-${epoch}.eval" ]; then return; fi
+
+    suf="$(echo $eval | sed 's/\.eval//g' | cut -d- -f1 | rev | cut -d/ -f1 | rev)";
+    tm="$(stat -c %y $eval | cut -d. -f1 | sed 's/202.-//g' | cut -d: -f-2)"
+
+    if ! tail -n1 $eval | grep -q final; then
+      len="$(wc -l $eval | awk '{print $1}')"
+      score1="$(cat $eval | awk '{s+=$1} END{print s/NR}')"
+      printf "%11s %40s\t%.4f\n" \
+        "CONT ($len)" "$suf($kepoch)" $score1
+      continue
+    fi
+    printf "%11s %40s\t" "$tm" "$suf($kepoch)"
+    tail -n1 $eval | grep final | sed 's/final: //g' \
+      | awk '{printf "%.4f\n", $1}'
+  done
+}
+
+if [ -z ${epochs+x} ]; then
+  if [ -z ${prefs+x} ]; then
+    epochs="$(ls ${evaldir}/*.eval 2> /dev/null | grep -o "\-[0-9]*\.eval" | cut -d- -f2 | cut -d. -f1 | sort -k1 -n | uniq)"
+    for epoch in $epochs; do
+      print_epoch $epoch ""
+    done
+
+  else
+    for pref in "${prefs[@]}"; do
+      epochs="$(ls ${evaldir}/${pref}*.eval 2> /dev/null | grep -o "\-[0-9]*\.eval" | cut -d- -f2 | cut -d. -f1 | sort -k1 -n | uniq)"
+      for epoch in $epochs; do
+        print_epoch $epoch "$pref"
+      done
+    done
+  fi
+
+else
+  if [ -z ${prefs+x} ]; then
+    for epoch in "${epochs[@]}"; do
+      print_epoch $epoch ""
+    done
+
+  else
+    for pref in "${prefs[@]}"; do
+      for epoch in "${epochs[@]}"; do
+        print_epoch $epoch "$pref"
+      done
+    done
+  fi
+fi
