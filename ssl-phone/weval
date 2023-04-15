@@ -1,0 +1,43 @@
+#!/usr/bin/bash
+
+USAGE="Usage: $0 -e <exp> [-s] [-m <max-epoch>]"
+EXAMPLE="($0 -e naive)"
+
+unset exps; maxepoch=70000
+while getopts ":e:m:" opt; do
+  case $opt in
+    e) exps+=("$OPTARG") ;;
+    m) maxepoch="$OPTARG" ;;
+    ?) echo "$USAGE"; echo "$EXAMPLE"; exit 2 ;;
+  esac
+done
+
+if [ -z ${exps+x} ]; then
+  echo "$USAGE"; echo "$EXAMPLE"; exit 2
+fi
+
+for exp in "${exps[@]}"; do
+  if [ ! -d "exps/$exp/" ]; then
+    echo "exp/$exp/ not exists"
+    continue
+  fi
+
+  for epoch in $(seq 10000 10000 ${maxepoch}); do 
+    if [ -f "results/$exp-${epoch}.eval" ]; then
+      echo "$exp-${epoch}.eval already exists"
+      continue
+    fi
+
+    print_first=true
+    while [ ! -f "exps/$exp/model-${epoch}.ckpt.index" ]; do
+      if $print_first; then
+        echo "Waiting exps/$exp/model-${epoch}.ckpt..."
+      fi;
+      print_first=false
+      sleep 10s
+    done
+
+    CUDA_VISIBLE_DEVICES=-1 python3 eval.py \
+      --ckpt exps/$exp/model-${epoch}.ckpt 
+  done
+done
