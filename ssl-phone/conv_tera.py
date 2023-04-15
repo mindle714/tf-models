@@ -13,8 +13,8 @@ m = torch.load("/home/hejung/tera_960hr/states-1000000.ckpt")
 model = tera_phone()
 
 import numpy as np
-pcm = np.zeros(16000)
-_in = np.reshape(pcm, [1, -1])
+spec = np.zeros(1701*80)
+_in = np.reshape(spec, [1,1701,80])
 _tmp = model(_in)
 
 w = m['Transformer']['input_representations.spec_transform.weight'].cpu().numpy()

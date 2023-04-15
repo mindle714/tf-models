@@ -19,7 +19,7 @@ parser.add_argument("--accum-step", type=int, required=False, default=1)
 parser.add_argument("--eval-step", type=int, required=False, default=100) 
 parser.add_argument("--save-step", type=int, required=False, default=10000) 
 parser.add_argument("--val-step", type=int, required=False, default=5000) 
-parser.add_argument("--train-step", type=int, required=False, default=100000) 
+parser.add_argument("--train-step", type=int, required=False, default=70000) 
 parser.add_argument("--begin-lr", type=float, required=False, default=1e-4) 
 parser.add_argument("--lr-decay-rate", type=float, required=False, default=0.96)
 parser.add_argument("--lr-decay-step", type=float, required=False, default=2000.)
@@ -139,7 +139,7 @@ import tera
 m = tera.tera_phone()
 
 if args.accum_step > 1:
-  _in = np.zeros((args.batch_size, samp_len), dtype=np.float32)
+  _in = np.zeros((args.batch_size, 1701, 80), dtype=np.float32)
   _ = m(_in)
   accum_grads = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights]
 
@@ -195,15 +195,18 @@ def run_step(step, spec, txt, spec_len, txt_len, training=True, accum=False):
             
     else:
       for idx, grad in enumerate(grads):
+        if grad is None: continue
         accum_grads[idx].assign_add(grad)
 
       if not accum:
         for idx, grad in enumerate(grads):
+          if grad is None: continue
           accum_grads[idx].assign(accum_grads[idx]/args.accum_step)
 
         opt.apply_gradients(zip(accum_grads, m.trainable_weights))
                 
         for idx, grad in enumerate(grads):
+          if grad is None: continue
           accum_grads[idx].assign(tf.zeros_like(grad))
 
   return loss, sloss, ssl_weight
@@ -240,7 +243,7 @@ if args.warm_start is not None:
       opt_weight = np.load(opt_weight, allow_pickle=True)
       opt_cfg = np.load(opt_cfg, allow_pickle=True).flatten()[0] 
 
-  _in = np.zeros((args.batch_size, samp_len), dtype=np.float32)
+  _in = np.zeros((args.batch_size, 1701, 80), dtype=np.float32)
   _ = m(_in)
   ckpt.read(args.warm_start).assert_consumed()
 
