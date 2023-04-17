@@ -4,6 +4,8 @@ parser.add_argument("--ckpt", type=str, required=True)
 parser.add_argument("--eval-list", type=str, required=False, 
   default="/data/hejung/librispeech/test-clean.flac.phone")
 parser.add_argument("--beam-size", type=int, required=False, default=0)
+parser.add_argument("--chunk-len", type=int, required=False, default=272000)
+parser.add_argument("--pad-short", action="store_true")
 args = parser.parse_args()
 
 import os
@@ -61,7 +63,7 @@ def softmax(x):
   denom = np.sum(num, -1, keepdims=True)
   return num / denom
 
-def eval(_pcm, chunk_len = 272000):
+def eval(_pcm, chunk_len):
   pcm, _ = librosa.load(_pcm, sr = 16000)
   pcm_len = pcm.shape[0]
 
@@ -71,8 +73,12 @@ def eval(_pcm, chunk_len = 272000):
     _pcm_len = _pcm.shape[0]
 
     if _pcm_len < chunk_len:
-      _pcm = np.concatenate([_pcm, 
-        np.zeros(chunk_len - _pcm_len, dtype=_pcm.dtype)], -1)
+      if args.pad_short:
+        _pcm = np.concatenate([_pcm, 
+          np.zeros(chunk_len - _pcm_len, dtype=_pcm.dtype)], -1)
+
+      else:
+        if _pcm_len < 200: continue # if > n_fft//2, error in reflect pad
 
     spec_dict = parse_data.conv_spec(
       {'pcm': np.expand_dims(_pcm, 0).astype(np.float32), 'pcm_len':chunk_len})
@@ -149,7 +155,7 @@ with open(join("results", "{}.eval".format(resname)), "w") as f:
     _pcm = pcm_ref.split()[0]
     _ref = [int(e) for e in pcm_ref.split()[1:]]
 
-    hyp = eval(_pcm)
+    hyp = eval(_pcm, args.chunk_len)
     _per = metric.per([hyp], [tokenizer.decode(_ref)])
     pers.append(_per)
 
