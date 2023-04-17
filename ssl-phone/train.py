@@ -35,6 +35,7 @@ parser.add_argument("--period-ssl", type=int, required=False, default=100000)
 parser.add_argument("--period-ssl-decay", type=float, required=False, default=1.0)
 parser.add_argument("--output", type=str, required=True) 
 parser.add_argument("--warm-start", type=str, required=False, default=None)
+parser.add_argument("--stop-grad", action='store_true')
 parser.add_argument("--from-init", action='store_true')
 parser.add_argument("--profile", action='store_true')
 args = parser.parse_args()
@@ -160,10 +161,14 @@ if args.profile:
   tf.profiler.experimental.start(logdir)
 
 @tf.function
-def run_step(step, spec, txt, spec_len, txt_len, training=True, accum=False):
+def run_step(step, spec, txt, spec_len, txt_len,
+             training=True, accum=False, stop_grad=False):
   with tf.GradientTape() as tape, log_writer.as_default():
     loss, sloss = m((spec, txt, spec_len, txt_len), 
-      training=training, ssl_loss = (not (args.ssl_weight == 0)))
+      training=training, 
+      ssl_loss = (not (args.ssl_weight == 0)),
+      stop_grad=stop_grad)
+
     loss = tf.math.reduce_mean(loss)
     tf.summary.scalar("loss", loss, step=step)
     sloss = tf.where(sloss > args.ssl_margin, sloss, tf.zeros_like(sloss))
@@ -271,7 +276,7 @@ for idx, data in enumerate(dataset):
         loss, sloss, sw = run_step(
           tf.cast(idx, tf.int64),
           data["spec"], data["txt"], data["spec_len"], data["txt_len"],
-          accum=accum)
+          accum=accum, stop_grad=args.stop_grad)
       _traced_cnt -= 1
 
     elif idx > (init_epoch + _traced_begin) and  _traced_cnt == 0:
@@ -282,13 +287,13 @@ for idx, data in enumerate(dataset):
         loss, sloss, sw = run_step(
           tf.cast(idx, tf.int64),
           data["spec"], data["txt"], data["spec_len"], data["txt_len"],
-          accum=accum)
+          accum=accum, stop_grad=args.stop_grad)
 
   else:
     loss, sloss, sw = run_step(
       tf.cast(idx, tf.int64),
       data["spec"], data["txt"], data["spec_len"], data["txt_len"],
-      accum=accum)
+      accum=accum, stop_grad=args.stop_grad)
 
   log_writer.flush()
 

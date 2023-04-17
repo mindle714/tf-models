@@ -242,7 +242,7 @@ class tera_phone(tf.keras.layers.Layer):
     self.proj = tf.keras.layers.Dense(256, use_bias=True)
     self.linear = tf.keras.layers.Dense(74, use_bias=True)
   
-  def call(self, inputs, training=None, ssl_loss=False):
+  def call(self, inputs, training=None, ssl_loss=False, stop_grad=False):
     if isinstance(inputs, tuple) and len(inputs) == 4:
       x, ref, x_len, ref_len = inputs
 
@@ -266,6 +266,8 @@ class tera_phone(tf.keras.layers.Layer):
       xs, _ = self.tera(x)
 
     x = sum(xs)
+    if stop_grad:
+      x = tf.stop_gradient(x)
 
     '''
     _xs = tf.split(x, split, axis=0)
