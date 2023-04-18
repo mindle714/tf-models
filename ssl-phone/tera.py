@@ -284,7 +284,7 @@ class tera_phone(tf.keras.layers.Layer):
       if ssl_loss:
         x_mask, mask_label = mask_tera(x_feat)
         mask_label = tf.cast(mask_label, tf.float32)
-        _, _, seq_out = self.tera(x_mask)
+        _, seq_out = self.tera(x_mask)
         seq_loss = tf.math.abs(mask_label * (x_feat - seq_out))
 
         seq_loss = tf.math.reduce_sum(seq_loss, [-1, -2])
