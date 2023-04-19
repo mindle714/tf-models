@@ -282,7 +282,7 @@ class tera_phone(tf.keras.layers.Layer):
     if ref is not None:
       seq_loss = 0.
       if ssl_loss:
-        x_mask, mask_label = mask_tera(x_feat)
+        x_mask, mask_label = mask_tera(x_feat, x_len)
         mask_label = tf.cast(mask_label, tf.float32)
         _, seq_out = self.tera(x_mask)
         seq_loss = tf.math.abs(mask_label * (x_feat - seq_out))

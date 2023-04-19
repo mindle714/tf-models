@@ -5,11 +5,17 @@ import random
 tf.random.set_seed(1234)
 random.seed(1234)
 
-def mask_tera(x, mask_ratio=0.15, 
+def mask_tera(x, x_len=None,
+              mask_ratio=0.15, 
               min_len=7, max_len=7, mask_freq=0.2):
   batch_size = x.shape[0]
-  spec_len = tf.cast(tf.shape(x)[1], tf.float32)
   mask_label = tf.zeros_like(x, tf.uint8)
+
+  if x_len is None:
+    x_len = tf.cast(tf.shape(x)[1], tf.float32)
+    x_len = tf.tile(tf.expand_dims(x, 0), [batch_size])
+  else:
+    x_len = tf.cast(tf.squeeze(x_len, -1), tf.float32)
     
   def _starts_to_intervals(starts, mask_len):
     tiled = tf.tile(tf.expand_dims(starts, -1), [1, mask_len])
@@ -22,15 +28,15 @@ def mask_tera(x, mask_ratio=0.15,
     # time masking
     if mask_ratio > 0:
       mask_len = random.randint(min_len, max_len)
-      valid_start_max = tf.math.maximum(spec_len - mask_len - 1, 0)
-      ratio = tf.math.round(spec_len * mask_ratio / mask_len)
+      valid_start_max = tf.math.maximum(x_len[idx] - mask_len - 1, 0)
+      ratio = tf.math.round(x_len[idx] * mask_ratio / mask_len)
       ratio = tf.cast(ratio, tf.int32)
 
       chosen_starts = tf.random.shuffle(tf.range(valid_start_max + 1), seed=1234)[:ratio]
       chosen_intervals = _starts_to_intervals(chosen_starts, mask_len)
                 
       # determine whether to mask / random / or do nothing to the frame
-      dice = tf.random.uniform(shape=()) #random.random()
+      dice = tf.random.uniform(shape=())
       # mask to zero
       if dice < 0.8:
         indices = tf.concat([
