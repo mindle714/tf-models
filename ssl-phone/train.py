@@ -27,7 +27,7 @@ parser.add_argument("--val-lr-update", type=float, required=False, default=3)
 parser.add_argument("--ssl-weight", type=float, required=False, default=0)
 parser.add_argument("--ssl-decay", action='store_true')
 parser.add_argument("--ssl-decay-schedule", type=str, required=False,
-  choices=["linear", "exp", "cos", "stair"], default="linear")
+  choices=["linear", "exp", "cos", "stair", "inv-linear"], default="linear")
 parser.add_argument("--ssl-margin", type=float, required=False, default=0)
 parser.add_argument("--begin-ssl", type=int, required=False, default=0)
 parser.add_argument("--end-ssl", type=int, required=False, default=100000)
@@ -59,6 +59,12 @@ def linear_decay(step, decay_steps, init_lr, end_lr = 0.):
   if step > decay_steps: return end_lr
   return ((end_lr - init_lr) / decay_steps) * step + init_lr
 
+# TODO add optional multiplier
+def inv_linear_decay(step, decay_steps, init_lr):
+  end_lr = 2 * init_lr
+  if step > decay_steps: return end_lr
+  return ((end_lr - init_lr) / decay_steps) * step + init_lr
+
 def stair_decay(step, decay_steps, init_lr, end_lr = 0., decay_unit = 100):
   if step > decay_steps: return end_lr
   _step = (step // decay_unit) * decay_unit
@@ -72,6 +78,8 @@ elif args.ssl_decay_schedule == "cos":
   factor_decay = cos_decay
 elif args.ssl_decay_schedule == "stair":
   factor_decay = stair_decay
+elif args.ssl_decay_schedule == "inv-linear":
+  factor_decay = inv_linear_decay
 else:
   assert False, "unknown type {}".format(args.ssl_decay_schedule)
 
