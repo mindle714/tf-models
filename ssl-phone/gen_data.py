@@ -64,8 +64,13 @@ if args.samp_list is not None:
   _train_list.append(_train)
   max_text_len = max(max_text_len, _text_len)
   train_list = _train_list
-  print("Maximum text length : {}".format(max_text_len))
   args.text_len = max_text_len
+
+else:
+  max_text_len = max([len(e.split()) for e in train_list]) - 1
+  args.text_len = max_text_len
+  
+print("Maximum text length : {}".format(max_text_len))
 
 import warnings
 import tensorflow as tf

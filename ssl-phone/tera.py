@@ -228,11 +228,12 @@ def stft_loss(x, ref, frame_length, frame_step, fft_length):
   return sc_loss + mag_loss
 
 class tera_phone(tf.keras.layers.Layer):
-  def __init__(self, *args, **kwargs):
+  def __init__(self, num_class=74, *args, **kwargs):
     super(tera_phone, self).__init__(*args, **kwargs)
 
     self.n_fft = 400
     self.hop_len = 160
+    self.num_class = num_class
 
   def build(self, input_shape):
     conv_opt = dict(padding='same', use_bias=False)
@@ -240,7 +241,7 @@ class tera_phone(tf.keras.layers.Layer):
     self.tera = tera_seq(self.n_fft, self.hop_len)
 
     self.proj = tf.keras.layers.Dense(256, use_bias=True)
-    self.linear = tf.keras.layers.Dense(74, use_bias=True)
+    self.linear = tf.keras.layers.Dense(self.num_class, use_bias=True)
   
   def call(self, inputs, training=None, ssl_loss=False, stop_grad=False):
     if isinstance(inputs, tuple) and len(inputs) == 4:

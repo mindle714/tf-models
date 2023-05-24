@@ -38,6 +38,7 @@ parser.add_argument("--warm-start", type=str, required=False, default=None)
 parser.add_argument("--stop-grad", action='store_true')
 parser.add_argument("--from-init", action='store_true')
 parser.add_argument("--profile", action='store_true')
+parser.add_argument("--timit", action='store_true')
 args = parser.parse_args()
 
 if args.begin_ssl > args.end_ssl:
@@ -132,7 +133,11 @@ import parse_data
 import glob
 
 tfrec_list = glob.glob(os.path.join(args.tfrec, "train-*.tfrecord"))
-dataset = parse_data.gen_train(tfrec_list, samp_len, txt_len,
+# TODO calculate on gen_data.py
+spec_len = 1701
+if args.timit:
+  spec_len = 801
+dataset = parse_data.gen_train(tfrec_list, spec_len, txt_len,
   batch_size=args.batch_size, seed=seed)
 
 val_dataset = None
@@ -145,7 +150,10 @@ lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
 import tera
-m = tera.tera_phone()
+if args.timit:
+  m = tera.tera_phone(num_class=39)
+else:
+  m = tera.tera_phone()
 
 if args.accum_step > 1:
   _in = np.zeros((args.batch_size, 1701, 80), dtype=np.float32)

@@ -3,3 +3,5 @@ exps/
 libriphone/
 *.ckpt.*
 *.wav
+results/
+timit/

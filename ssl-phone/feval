@@ -28,13 +28,14 @@ print_epoch() {
     if ! tail -n1 $eval | grep -q final; then
       len="$(wc -l $eval | awk '{print $1}')"
       score1="$(cat $eval | awk '{s+=$1} END{print s/NR}')"
-      printf "%11s %40s\t%.4f\n" \
+      score1="$(echo $score1 | awk '{print 100*(1-$1)}')"
+      printf "%11s %40s\t%.3f\n" \
         "CONT ($len)" "$suf($kepoch)" $score1
       continue
     fi
     printf "%11s %40s\t" "$tm" "$suf($kepoch)"
     tail -n1 $eval | grep final | sed 's/final: //g' \
-      | awk '{printf "%.4f\n", $1}'
+      | awk '{printf "%.3f\n", (1-$1)*100}'
   done
 }
 
