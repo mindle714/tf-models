@@ -204,6 +204,7 @@ def run_step(step, spec, txt, spec_len, txt_len,
       else:
         ssl_weight = _ssl_weight
 
+    tf.summary.scalar("ssl_weight", ssl_weight, step=step)
     total_loss = loss + ssl_weight * sloss
 
   if training:
@@ -224,7 +225,7 @@ def run_step(step, spec, txt, spec_len, txt_len,
           if grad is None: continue
           accum_grads[idx].assign(accum_grads[idx]/args.accum_step)
 
-        opt.apply_gradients(zip(accum_grads, m.trainable_weights))
+        opt.apply_gradients(zip(accum_grads, weights))
                 
         for idx, grad in enumerate(grads):
           if grad is None: continue
@@ -318,8 +319,9 @@ for idx, data in enumerate(dataset):
       idx, loss, sloss, lr.numpy(), sw))
 
   if val_dataset is None:
-    # follow tf.keras.optimizers.schedules.ExponentialDecay
-    lr.assign(args.begin_lr * args.lr_decay_rate**(idx/args.lr_decay_step))
+    if args.accum_step == 1 or not accum:
+      # follow tf.keras.optimizers.schedules.ExponentialDecay
+      lr.assign(args.begin_lr * args.lr_decay_rate**(idx/args.lr_decay_step))
 
   elif idx > init_epoch and idx % args.val_step == 0:
     val_loss = 0; num_val = 0
