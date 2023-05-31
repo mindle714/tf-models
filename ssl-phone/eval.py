@@ -42,7 +42,7 @@ if os.path.exists(join(expdir, "tera.py")):
   if os.path.dirname(tera.__file__) != expdir:
     sys.exit("tera is loaded from {}".format(tera.__file__))
   if args.timit:
-    m = tera.tera_phone(num_class=49)
+    m = tera.tera_phone(num_class=50)
   else:
     m = tera.tera_phone()
 

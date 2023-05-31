@@ -154,7 +154,7 @@ opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
 import tera
 if args.timit:
-  m = tera.tera_phone(num_class=49)
+  m = tera.tera_phone(num_class=50)
 else:
   m = tera.tera_phone()
 
