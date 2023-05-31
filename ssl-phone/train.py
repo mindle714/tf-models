@@ -151,13 +151,13 @@ opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
 import tera
 if args.timit:
-  m = tera.tera_phone(num_class=39)
+  m = tera.tera_phone(num_class=49)
 else:
   m = tera.tera_phone()
 
 if args.accum_step > 1:
   _in = np.zeros((args.batch_size, 1701, 80), dtype=np.float32)
-  _ = m(_in)
+  _ = m(_in, ctc = (not args.timit))
   accum_grads = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights]
 
 specs = [val.__spec__ for name, val in sys.modules.items() \
@@ -183,7 +183,8 @@ def run_step(step, spec, txt, spec_len, txt_len,
     loss, sloss = m((spec, txt, spec_len, txt_len), 
       training=training, 
       ssl_loss = (not (args.ssl_weight == 0)),
-      stop_grad=stop_grad)
+      stop_grad=stop_grad,
+      ctc = (not args.timit))
 
     loss = tf.math.reduce_mean(loss)
     tf.summary.scalar("loss", loss, step=step)

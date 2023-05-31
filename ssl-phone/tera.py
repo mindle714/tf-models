@@ -243,7 +243,8 @@ class tera_phone(tf.keras.layers.Layer):
     self.proj = tf.keras.layers.Dense(256, use_bias=True)
     self.linear = tf.keras.layers.Dense(self.num_class, use_bias=True)
   
-  def call(self, inputs, training=None, ssl_loss=False, stop_grad=False):
+  def call(self, inputs, training=None, 
+           ssl_loss=False, stop_grad=False, ctc=True):
     if isinstance(inputs, tuple) and len(inputs) == 4:
       x, ref, x_len, ref_len = inputs
 
@@ -292,12 +293,27 @@ class tera_phone(tf.keras.layers.Layer):
         denom = tf.math.reduce_sum(mask_label, [-1, -2])
         seq_loss /= (denom + 1e-9)
 
-      ctc_loss = _ctc_loss(
-        tf.cast(ref, tf.int32), x, 
-        tf.squeeze(tf.cast(ref_len, tf.int32), -1), 
-        tf.squeeze(tf.cast(x_len, tf.int32), -1), 
-        blank_index=0)
+      if ctc:
+        ctc_loss = _ctc_loss(
+          tf.cast(ref, tf.int32), x, 
+          tf.squeeze(tf.cast(ref_len, tf.int32), -1), 
+          tf.squeeze(tf.cast(x_len, tf.int32), -1), 
+          blank_index=0)
 
-      return ctc_loss, seq_loss
+        return ctc_loss, seq_loss
+
+      else:
+        ce_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
+          tf.cast(ref, tf.int32), x)
+
+        _ref_len = tf.squeeze(ref_len, -1)
+        ce_mask = tf.sequence_mask(_ref_len, tf.shape(x)[1])
+        ce_mask = tf.cast(ce_mask, x.dtype)
+
+        ce_loss = ce_loss * ce_mask
+        ce_loss = tf.math.reduce_sum(ce_loss, -1)
+        ce_loss /= (tf.cast(_ref_len, x.dtype) + 1e-9)
+
+        return ce_loss, seq_loss
 
     return x

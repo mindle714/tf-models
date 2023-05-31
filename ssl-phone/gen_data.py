@@ -5,6 +5,7 @@ parser.add_argument("--samp-list", type=str, required=False, default=None)
 parser.add_argument("--num-chunks", type=int, required=False, default=100)
 parser.add_argument("--samp-rate", type=int, required=False, default=16000)
 parser.add_argument("--samp-len", type=int, required=False, default=272000)
+parser.add_argument("--text-len", type=int, required=False, default=None)
 parser.add_argument("--output", type=str, required=True) 
 args = parser.parse_args()
 
@@ -64,13 +65,18 @@ if args.samp_list is not None:
   _train_list.append(_train)
   max_text_len = max(max_text_len, _text_len)
   train_list = _train_list
-  args.text_len = max_text_len
 
 else:
   max_text_len = max([len(e.split()) for e in train_list]) - 1
-  args.text_len = max_text_len
   
 print("Maximum text length : {}".format(max_text_len))
+
+if args.text_len is not None:
+  max_text_len = args.text_len
+  print("Overrided text length : {}".format(max_text_len))
+
+else:
+  args.text_len = max_text_len
 
 import warnings
 import tensorflow as tf
@@ -164,8 +170,14 @@ for bidx in tqdm.tqdm(range(len(train_list)//num_process+1)):
       pcms.append(pcm)
       txts.append(txt)
 
-  with multiprocessing.Pool(num_process) as pool:
-    exs = pool.starmap(get_feats, zip(pcms, txts))
+  if num_process > 1:
+    with multiprocessing.Pool(num_process) as pool:
+      exs = pool.starmap(get_feats, zip(pcms, txts))
+
+  else:
+    exs = []
+    for pcm, txt in zip(pcms, txts):
+      exs.append(get_feats(pcm, txt))
 
   for ex in exs:
     if ex is None: continue

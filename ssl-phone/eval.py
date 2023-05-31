@@ -1,16 +1,20 @@
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--ckpt", type=str, required=True) 
-parser.add_argument("--eval-list", type=str, required=False, 
-  default="/data/hejung/librispeech/test-clean.flac.phone")
 parser.add_argument("--beam-size", type=int, required=False, default=0)
 parser.add_argument("--chunk-len", type=int, required=False, default=272000)
 parser.add_argument("--pad-short", action="store_true")
+parser.add_argument("--timit", action='store_true')
 args = parser.parse_args()
 
 import os
 from os.path import join
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+
+if args.timit:
+  args.eval_list = "/data/hejung/timit/test.wav.phone"
+else:
+  args.eval_list = "/data/hejung/librispeech/test-clean.flac.phone"
 
 assert os.path.isfile(args.eval_list)
 
@@ -37,13 +41,19 @@ if os.path.exists(join(expdir, "tera.py")):
   import tera
   if os.path.dirname(tera.__file__) != expdir:
     sys.exit("tera is loaded from {}".format(tera.__file__))
-  m = tera.tera_phone()
+  if args.timit:
+    m = tera.tera_phone(num_class=49)
+  else:
+    m = tera.tera_phone()
 
 else:
   assert False, "Invalid experiment path {}".format(expdir)
 
 import numpy as np
-_in = np.zeros((1, 1701, 80), dtype=np.float32)
+if args.timit:
+  _in = np.zeros((1, 801, 80), dtype=np.float32)
+else:
+  _in = np.zeros((1, 1701, 80), dtype=np.float32)
 _ = m(_in, training=False)
 
 ckpt = tf.train.Checkpoint(m)
@@ -95,6 +105,7 @@ def eval(_pcm, chunk_len):
         if prev != 0: truns.append(prev)
       prev = idx
     if prev != 0: truns.append(prev)
+    if args.timit: return truns
     return tokenizer.decode(truns)
   
   if args.beam_size < 1:
@@ -142,24 +153,40 @@ resname = "{}-{}".format(expname, epoch)
 evals = [e.strip() for e in open(args.eval_list, "r").readlines()]
 pers = []
 
-path = "/data/hejung/librispeech"
-lexicon = [
+if args.timit:
+  with open(join("results_timit", "{}.eval".format(resname)), "w") as f:
+    for idx, pcm_ref in enumerate(evals):
+      _pcm = pcm_ref.split()[0]
+      _ref = [int(e) for e in pcm_ref.split()[1:]]
+      
+      hyp = eval(_pcm, args.chunk_len)
+      _per = metric.per([hyp], [_ref])
+      pers.append(_per)
+
+      f.write("{} {}\n".format(_per, " ".join(hyp)))
+      f.flush()
+
+    f.write("final: {}\n".format(np.mean(pers)))
+
+else:
+  path = "/data/hejung/librispeech"
+  lexicon = [
     join(path, "lexicon/librispeech-lexicon-200k-g2p.txt"),
     join(path, "lexicon/librispeech-lexicon-allothers-g2p.txt")
-]
-tokenizer = WordTextEncoder.load_from_file(
+  ]
+  tokenizer = WordTextEncoder.load_from_file(
     join(path, "vocab/phoneme.txt"))
 
-with open(join("results", "{}.eval".format(resname)), "w") as f:
-  for idx, pcm_ref in enumerate(evals):
-    _pcm = pcm_ref.split()[0]
-    _ref = [int(e) for e in pcm_ref.split()[1:]]
+  with open(join("results", "{}.eval".format(resname)), "w") as f:
+    for idx, pcm_ref in enumerate(evals):
+      _pcm = pcm_ref.split()[0]
+      _ref = [int(e) for e in pcm_ref.split()[1:]]
 
-    hyp = eval(_pcm, args.chunk_len)
-    _per = metric.per([hyp], [tokenizer.decode(_ref)])
-    pers.append(_per)
+      hyp = eval(_pcm, args.chunk_len)
+      _per = metric.per([hyp], [tokenizer.decode(_ref)])
+      pers.append(_per)
 
-    f.write("{} {}\n".format(_per, " ".join(hyp)))
-    f.flush()
+      f.write("{} {}\n".format(_per, " ".join(hyp)))
+      f.flush()
 
-  f.write("final: {}\n".format(np.mean(pers)))
+    f.write("final: {}\n".format(np.mean(pers)))
