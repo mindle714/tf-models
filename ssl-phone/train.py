@@ -14,15 +14,15 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--tfrec", type=str, required=True) 
 parser.add_argument("--val-tfrec", type=str, required=False, default=None)
-parser.add_argument("--batch-size", type=int, required=False, default=2) 
-parser.add_argument("--accum-step", type=int, required=False, default=1)
+parser.add_argument("--batch-size", type=int, required=False, default=8) 
+parser.add_argument("--accum-step", type=int, required=False, default=2)
 parser.add_argument("--eval-step", type=int, required=False, default=100) 
 parser.add_argument("--save-step", type=int, required=False, default=10000) 
 parser.add_argument("--val-step", type=int, required=False, default=5000) 
-parser.add_argument("--train-step", type=int, required=False, default=70000) 
-parser.add_argument("--begin-lr", type=float, required=False, default=1e-4) 
+parser.add_argument("--train-step", type=int, required=False, default=45000) 
+parser.add_argument("--begin-lr", type=float, required=False, default=2e-4) 
 parser.add_argument("--lr-decay-rate", type=float, required=False, default=0.96)
-parser.add_argument("--lr-decay-step", type=float, required=False, default=2000.)
+parser.add_argument("--lr-decay-step", type=float, required=False, default=4000)
 parser.add_argument("--val-lr-update", type=float, required=False, default=3) 
 parser.add_argument("--ssl-weight", type=float, required=False, default=0)
 parser.add_argument("--ssl-decay", action='store_true')
@@ -30,8 +30,8 @@ parser.add_argument("--ssl-decay-schedule", type=str, required=False,
   choices=["linear", "exp", "cos", "stair", "inv-linear"], default="linear")
 parser.add_argument("--ssl-margin", type=float, required=False, default=0)
 parser.add_argument("--begin-ssl", type=int, required=False, default=0)
-parser.add_argument("--end-ssl", type=int, required=False, default=100000)
-parser.add_argument("--period-ssl", type=int, required=False, default=100000)
+parser.add_argument("--end-ssl", type=int, required=False, default=None)
+parser.add_argument("--period-ssl", type=int, required=False, default=None)
 parser.add_argument("--period-ssl-decay", type=float, required=False, default=1.0)
 parser.add_argument("--output", type=str, required=True) 
 parser.add_argument("--warm-start", type=str, required=False, default=None)
@@ -41,8 +41,11 @@ parser.add_argument("--profile", action='store_true')
 parser.add_argument("--timit", action='store_true')
 args = parser.parse_args()
 
-if args.begin_ssl > args.end_ssl:
-  sys.exit("--begin-ssl value must not exceed --end-ssl")
+if args.end_ssl is None:
+  args.end_ssl = args.train_step
+
+if args.period_ssl is None:
+  args.period_ssl = args.train_step
 
 def cos_decay(step, decay_steps, init_lr, alpha=0.):
   step = tf.math.minimum(step, decay_steps)
@@ -313,6 +316,7 @@ for idx, data in enumerate(dataset):
       accum=accum, stop_grad=args.stop_grad)
 
   log_writer.flush()
+  tf.summary.scalar("lr", lr, step=idx)
 
   if idx > init_epoch and idx % args.eval_step == 0:
     logger.info("gstep[{}] loss[{:.2f}] sloss[{:.2f}] lr[{:.2e}] sr[{:.2e}]".format(
