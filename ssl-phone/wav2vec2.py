@@ -6,6 +6,42 @@ tf_sum = tf.math.reduce_sum
 tf_expd = tf.expand_dims
 gelu = tf.keras.activations.gelu
 
+def sample_negative_indices(batch_size, seq_len,
+                            num_neg, mask_time_indices):
+  if mask_time_indices is None:
+    mask_time_indices = tf.ones((batch_size, seq_len))
+
+  neg_indices = []
+  for idx in range(batch_size):
+    high = tf.math.reduce_sum(mask_time_indices[idx]) - 1
+    mapped_masked_indices = tf.squeeze(tf.where(mask_time_indices[idx]), 1)
+
+    feat_indices = tf.expand_dims(tf.range(high + 1, dtype=tf.int32) , -1)
+    feat_indices = tf.tile(feat_indices, [1, num_neg])
+
+    '''
+    sampled_indices = tf.random.uniform(
+      (high + 1, num_negatives), 0, high, dtype=tf.int32)
+    '''
+    if idx == 0:
+      sampled_indices = np.load('sampled_indices_0.npy')
+      sampled_indices = tf.constant(sampled_indices, dtype=tf.int32)
+    else:
+      sampled_indices = np.load('sampled_indices_1.npy')
+      sampled_indices = tf.constant(sampled_indices, dtype=tf.int32)
+    sampled_indices = tf.where(sampled_indices >= feat_indices,
+      sampled_indices + 1, sampled_indices)
+
+    _updates = tf.gather(mapped_masked_indices, sampled_indices)      
+    _neg_indices = tf.scatter_nd(
+      tf.where(mask_time_indices[idx]), _updates, [seq_len, num_neg])
+    _neg_indices += idx * seq_len
+    neg_indices.append(_neg_indices)
+
+  neg_indices = tf.concat([
+    tf.expand_dims(e, 0) for e in neg_indices], 0)
+  return neg_indices
+
 class gnormconv1d(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
     super(gnormconv1d, self).__init__(*args, **kwargs)

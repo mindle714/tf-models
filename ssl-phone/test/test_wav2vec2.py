@@ -82,31 +82,79 @@ model.quantizer.codevectors.assign(w)
 w = m['wav2vec2.masked_spec_embed'].cpu().numpy()
 model.wav2vec2.masked_spec_embed.assign(w)
 
-mask_time_indices = np.load('mask_time_indices.npy').astype(np.float32)
-sampled_negative_indices = np.load('sampled_negative_indices.npy')
+import mask
 
-x, qx_feat = model((_in, mask_time_indices, sampled_negative_indices), training=True)
-print(x, qx_feat)
+#mask_time_indices = np.load('mask_time_indices.npy').astype(np.float32)
+seq_len = mask.get_feat_extract_output_length(_in.shape[1])
+mask_time_indices = mask.compute_mask_indices(
+  _in.shape[0], seq_len, None, 0.2, 2, 0)  
+
+#sampled_negative_indices = np.load('sampled_negative_indices.npy')
+sampled_negative_indices = sample_negative_indices(
+  _in.shape[0], seq_len, 100, mask_time_indices)  
+
+x, qx_feat, loss = model((_in, mask_time_indices, sampled_negative_indices), training=True)
+print(x, qx_feat, loss)
 
 '''
-(venv3.7-tera) hejung@speech:~/tf-models/ssl$ python3 test_wav2vec2.py
+(venv3-s3prl) hejung@speecht7:~/tf-models/ssl-phone/test$ python3 test_wav2vec2.py
 tf.Tensor(
-[[[-0.03795013  0.18967038  0.17773671 ...  0.22049077  0.2822556
-    0.33677945]
-  [-0.00936582  0.41093287 -0.02825753 ...  0.4727972   0.1705111
-    0.26599422]
-  [ 0.06454878  0.18859263 -0.02218433 ...  0.14479631  0.19384265
-    0.2460265 ]
+[[[-0.08230415  0.19224644  1.0171125  ...  0.60573643 -0.2818361
+   -1.7405095 ]
+  [-0.11546403 -0.32955498  1.3976142  ...  0.7780607  -0.23100913
+   -1.5106542 ]
+  [-0.4624009  -0.72181714  0.86816823 ... -0.07241634 -0.0333305
+   -0.83358896]
   ...
-  [-0.1849951   0.14248125 -0.14958894 ...  0.19302145  0.14552265
-    0.27958643]
-  [-0.10210146  0.41023663 -0.08990705 ...  0.0936659   0.1708027
-    0.2306513 ]
-  [ 0.00899731  0.21980184  0.18803358 ...  0.04501326  0.19920312
-    0.35360476]]], shape=(1, 49, 768), dtype=float32)
+  [-0.40031075  3.5778522   0.685996   ...  0.00991929  1.0833775
+   -1.1881367 ]
+  [ 0.16795045  0.33314243  1.3374524  ...  0.8260322  -0.26096678
+   -1.0532446 ]
+  [-0.2612179  -0.5210311   1.6374518  ...  0.43463713 -0.09315532
+   -1.1548278 ]]
 
-pushd ~/s3prl/s3prl
-python3 -m pdb run_downstream.py -m train -n ExpName -k /home/hejung/wav2vec2-base/pytorch_model.bin -g /home/hejung/wav2vec2-base/config.json -d speech_commands
-(Pdb) b /home/hejung/venv3.7-tera/lib/python3.7/site-packages/transformers/models/wav2vec2/modeling_wav2vec2.py:1079
+ [[ 0.40840015 -0.24011052  0.12556718 ...  0.08366838 -0.29980266
+   -1.8062729 ]
+  [ 0.64280236 -0.94143355  0.4831649  ... -0.4857757  -0.45735702
+   -1.1713867 ]
+  [ 0.39589936 -0.8151152   0.12698975 ... -0.65558887 -0.376135
+   -1.0569324 ]
+  ...
+  [ 0.42744908  0.3861401   0.7101313  ...  0.31882718  0.19559437
+   -1.3239496 ]
+  [ 0.6670534  -0.6872303   0.6887257  ...  0.5492828  -0.09047058
+   -1.0273757 ]
+  [ 0.65042174 -0.47396213  0.6384514  ...  0.31780222 -0.22380091
+   -1.6411686 ]]], shape=(2, 49, 256), dtype=float32) tf.Tensor(
+[[[-0.20424592  1.0620682  -0.06415138 ...  0.03070011  0.17831248
+   -0.306218  ]
+  [ 0.48933423  0.5720519  -0.46116647 ... -0.5115502  -0.20376638
+    0.5186587 ]
+  [-0.11333267  0.07002556 -0.15774763 ...  0.06021518 -0.02813273
+   -0.9968629 ]
+  ...
+  [ 0.2748624   0.35755044 -0.39926007 ... -0.730418   -0.09184477
+    0.5876132 ]
+  [ 0.05799696  0.3457167   0.13298586 ... -0.27164966 -0.04360084
+    0.2299884 ]
+  [-0.07032934 -0.06146909  0.19768064 ... -0.31404576 -0.09929797
+    0.15501016]]
+
+ [[-0.32734597  0.4567889  -0.1352315  ...  0.06446771  0.22887649
+   -0.16870238]
+  [ 0.48933423  0.5720519  -0.46116647 ... -0.5115502  -0.20376638
+    0.5186587 ]
+  [-0.04037524 -0.00808815 -0.00314383 ...  0.05927289  0.03996353
+   -0.3618939 ]
+  ...
+  [ 0.2748624   0.35755044 -0.39926007 ... -0.730418   -0.09184477
+    0.5876132 ]
+  [-0.18174382  0.05832914  0.3339933  ...  0.02448292  0.1848859
+   -0.0645766 ]
+  [ 0.17478843  0.33719546  0.10228443 ...  0.21498401 -0.11323874
+
+pushd ~/tf-models/ssl-phone/test/fairseq
+python3 -m pdb test_wav2vec2_pre.py
+(Pdb) b /home/hejung/venv3-s3prl/lib/python3.8/site-packages/transformers/models/wav2vec2/modeling_wav2vec2.py:1554
 (Pdb) c
 '''

@@ -94,3 +94,85 @@ def mask_tera(x, x_len=None,
       mask_label = tf.transpose(mask_label, [0, 2, 1])
 
   return x, mask_label
+
+def get_feat_extract_output_length(input_len):
+  def _conv_out_length(input_len, ksize, stride):
+    return ((input_len - ksize) // stride) + 1
+
+  for ksize, stride in zip(
+    [10, 3, 3, 3, 3, 2, 2], [5, 2, 2, 2, 2, 2, 2]):
+    input_len = _conv_out_length(input_len, ksize, stride)
+
+  return input_len
+
+assert get_feat_extract_output_length(16000) == 49 
+
+def compute_mask_indices(batch_size, seq_len, attention_mask = None,
+                         mask_prob = 0.05, mask_len = 10, min_masks = 2):
+#  epsilon = tf.random.uniform(())
+  epsilon = 0.1915194503788923 
+
+  def compute_num_span(input_len):
+    num_span = mask_prob * tf.cast(input_len, tf.float32) / tf.cast(mask_len, tf.float32) + epsilon
+    num_span = tf.cast(num_span, tf.int32)
+    num_span = tf.math.maximum(num_span, min_masks)
+
+    num_span = tf.math.minimum(num_span, seq_len // mask_len)
+    num_span = tf.math.minimum(num_span, input_len - (mask_len - 1))
+    num_span = tf.math.maximum(num_span, 0)
+
+    return num_span
+
+  if attention_mask is not None:
+    input_lens = tf.math.reduce_sum(attention_mask, -1)
+    input_lens = tf.cast(input_lens, dtype=tf.int32)
+  else:
+    input_lens = tf.ones(batch_size, dtype=tf.int32) * seq_len
+
+  mask = tf.zeros((batch_size, seq_len))
+  mask_idxs = []
+
+  max_num_span = compute_num_span(seq_len)
+  if max_num_span == 0:
+    return mask
+
+  for idx in range(batch_size):
+    input_len = input_lens[idx]
+
+    num_span = compute_num_span(input_len)
+#    mask_idx = tf.random.shuffle(tf.range(input_len - (mask_len - 1)))[:num_span]
+    if idx == 0: mask_idx = tf.constant([37, 45,  6, 44, 13])
+    else: mask_idx = tf.constant([43, 28, 33, 44, 12])
+
+    if num_span == 0:
+      dummy_mask_idx = seq_len - 1
+    else:
+      dummy_mask_idx = mask_idx[0]
+
+    pad = tf.ones(max_num_span - num_span, dtype=tf.int32)
+    mask_idx = tf.concat([
+      mask_idx, pad * dummy_mask_idx], 0)
+    mask_idxs.append(mask_idx)
+  
+  mask_idxs = tf.concat([tf.expand_dims(e, 0) for e in mask_idxs], 0)
+  mask_idxs = tf.tile(tf.expand_dims(mask_idxs, -1), [1, 1, mask_len])
+  mask_idxs = tf.reshape(mask_idxs, [batch_size, -1])
+
+  offsets = tf.reshape(tf.range(mask_len), [1, 1, -1])
+  offsets = tf.tile(offsets, [batch_size, max_num_span, 1])
+  offsets = tf.reshape(offsets, [batch_size, -1])
+
+  mask_idxs += offsets
+  mask_idxs = tf.math.minimum(mask_idxs, seq_len - 1)
+
+  # TODO naive! need to fully utilize scatter_nd
+  mask = [
+    tf.scatter_nd(tf.expand_dims(mask_idxs[_idx], -1), 
+      tf.ones(max_num_span*mask_len), [seq_len]) \
+    for _idx in range(batch_size)
+  ]
+  mask = tf.concat([tf.expand_dims(e, 0) for e in mask], 0)
+  mask = tf.cast(mask > 0, tf.float32)
+
+  return mask
+
