@@ -1,0 +1,381 @@
+import tensorflow as tf
+from util import *
+import gumbel
+
+tf_sum = tf.math.reduce_sum
+tf_expd = tf.expand_dims
+gelu = tf.keras.activations.gelu
+
+class gnormconv1d(tf.keras.layers.Layer):
+  def __init__(self, *args, **kwargs):
+    super(gnormconv1d, self).__init__(*args, **kwargs)
+
+  def build(self, input_shape):
+    self.conv = tf.keras.layers.Conv1D(512, kernel_size=10, strides=5, use_bias=False)
+    self.norm = gnorm(512)
+  
+  def call(self, inputs, training=None):
+    x = inputs
+    return gelu(self.norm(self.conv(x)))
+
+class nonormconv1d(tf.keras.layers.Layer):
+  def __init__(self, ksize, *args, **kwargs):
+    self.ksize = ksize
+    super(nonormconv1d, self).__init__(*args, **kwargs)
+
+  def build(self, input_shape):
+    self.conv = tf.keras.layers.Conv1D(512,
+      kernel_size=self.ksize, strides=2, use_bias=False)
+  
+  def call(self, inputs, training=None):
+    x = inputs
+    return gelu(self.conv(x))
+
+class featencoder(tf.keras.layers.Layer):
+  def __init__(self, *args, **kwargs):
+    super(featencoder, self).__init__(*args, **kwargs)
+
+  def build(self, input_shape):
+    ksizes = [3, 3, 3, 3, 2, 2]
+    self.conv_layers = [gnormconv1d()] + [nonormconv1d(ksizes[i]) for i in range(6)]
+  
+  def call(self, inputs, training=None, eps=1e-10):
+    x = inputs
+
+    for conv in self.conv_layers:
+      x = conv(x)
+
+    return x
+
+class featproj(tf.keras.layers.Layer):
+  def __init__(self, *args, **kwargs):
+    super(featproj, self).__init__(*args, **kwargs)
+
+  def build(self, input_shape):
+    self.norm = lnorm()
+    self.proj = tf.keras.layers.Dense(768, use_bias=True)
+    #self.dropout = tf.keras.layers.Dropout(0)
+    self.dropout = tf.identity
+  
+  def call(self, inputs, training=None):
+    x = inputs
+    x_norm = self.norm(x)
+    return self.dropout(self.proj(x_norm)), x_norm
+
+class posconvemb(tf.keras.layers.Layer):
+  def __init__(self, *args, **kwargs):
+    super(posconvemb, self).__init__(*args, **kwargs)
+
+  def build(self, input_shape):
+    self.conv = tf.keras.layers.Conv1D(768, 
+      kernel_size=128, strides=1, groups=16)
+  
+  def call(self, inputs, training=None):
+    x = inputs
+    #shape = [tf.shape(x)[0], 64, tf.shape(x)[-1]]
+    #pad = tf.zeros(shape)
+    #x_pad = tf.concat([pad, x, pad], 1)
+    x_pad = tf.pad(x, tf.constant([[0, 0], [64, 64], [0, 0]]), "CONSTANT")
+    return gelu(self.conv(x_pad)[:,:-1,:])
+
+class attention(tf.keras.layers.Layer):
+  def __init__(self, num_heads=12, dim=768, *args, **kwargs):
+    self.num_heads = num_heads
+    self.dim = dim
+    super(attention, self).__init__(*args, **kwargs)
+
+  def build(self, input_shape):
+    if isinstance(input_shape, tuple):
+      dim = input_shape[0][-1]
+
+    else:
+      dim = input_shape[-1]
+
+    self.head_dim = dim // self.num_heads
+    self.scaling = self.head_dim ** -0.5
+    self.k_proj = tf.keras.layers.Dense(self.dim, use_bias=True)
+    self.v_proj = tf.keras.layers.Dense(self.dim, use_bias=True)
+    self.q_proj = tf.keras.layers.Dense(self.dim, use_bias=True)
+    self.out_proj = tf.keras.layers.Dense(self.dim, use_bias=True)
+    #self.dropout = tf.keras.layers.Dropout(0)
+    self.dropout = tf.identity
+  
+  def call(self, inputs, training=None):
+    if isinstance(inputs, tuple):
+      x_k, x_q = inputs
+
+    else:
+      x = inputs
+      x_k = x; x_q = x
+
+    def reshape(e):
+      e = tf.reshape(e,
+        tf.concat([tf.shape(x_k)[:2], [self.num_heads, self.head_dim]], 0))
+      e = tf.transpose(e, [0, 2, 1, 3])
+      e = tf.reshape(e,
+        tf.concat([[-1], tf.shape(e)[-2:]], 0))
+      return e
+
+    q = reshape(self.q_proj(x_q) * self.scaling)
+    k = reshape(self.k_proj(x_k))
+    v = reshape(self.v_proj(x_q))
+
+    attn_weights = tf.linalg.matmul(q, k, transpose_b=True)
+    attn_weights = tf.nn.softmax(attn_weights, -1)
+    attn_probs = self.dropout(attn_weights)
+    attn_output = tf.linalg.matmul(attn_probs, v)
+
+    attn_output = tf.reshape(attn_output,
+      tf.concat([[-1, self.num_heads], tf.shape(attn_output)[-2:]], 0))
+    attn_output = tf.transpose(attn_output, [0, 2, 1, 3])
+    attn_output = tf.reshape(attn_output,
+      tf.concat([tf.shape(attn_output)[:-2], [-1]], 0))
+
+    attn_output = self.out_proj(attn_output)
+    return attn_output
+
+class feedforward(tf.keras.layers.Layer):
+  def __init__(self, *args, **kwargs):
+    super(feedforward, self).__init__(*args, **kwargs)
+
+  def build(self, input_shape):
+    self.in_dense = tf.keras.layers.Dense(3072, use_bias=True)
+    self.out_dense = tf.keras.layers.Dense(input_shape[-1], use_bias=True)
+    #self.in_dropout = tf.keras.layers.Dropout(0)
+    #self.out_dropout = tf.keras.layers.Dropout(0)
+    self.in_dropout = tf.identity
+    self.out_dropout = tf.identity
+  
+  def call(self, inputs, training=None):
+    x = inputs
+    x = self.in_dropout(gelu(self.in_dense(x)))
+    x = self.out_dropout(self.out_dense(x))
+    return x
+
+class enclayer(tf.keras.layers.Layer):
+  def __init__(self, *args, **kwargs):
+    super(enclayer, self).__init__(*args, **kwargs)
+
+  def build(self, input_shape):
+    self.atten = attention()
+    #self.dropout = tf.keras.layers.Dropout(0)
+    self.dropout = tf.identity
+    self.norm = lnorm()
+    self.feed = feedforward()
+    self.out_norm = lnorm()
+
+  def call(self, inputs, training=None):
+    x = inputs
+    x_attn = self.atten(x)
+    x_attn = self.dropout(x_attn)
+    x = x + x_attn
+    x = self.norm(x)
+    x = x + self.feed(x)
+    x = self.out_norm(x)
+    return x
+
+class encoder(tf.keras.layers.Layer):
+  def __init__(self, num_enc_layer, *args, **kwargs):
+    super(encoder, self).__init__(*args, **kwargs)
+    self.num_enc_layer = num_enc_layer
+
+  def build(self, input_shape):
+    self.emb = posconvemb()
+    self.norm = lnorm()
+    #self.dropout = tf.keras.layers.Dropout(0)
+    self.dropout = tf.identity
+    self.layers = [enclayer() for _ in range(self.num_enc_layer)]
+  
+  def call(self, inputs, training=None):
+    x = inputs
+
+    if len(self.layers) > 0:
+      x = x + self.emb(x)
+      x = self.norm(x)
+      x = self.dropout(x)
+
+    encs = []
+    for i, layer in enumerate(self.layers):
+      encs.append(x)
+      x = layer(x)
+
+    encs.append(x)
+    return encs
+
+class wav2vec2(tf.keras.layers.Layer):
+  def __init__(self,
+               num_enc_layer=1,
+               *args, **kwargs):
+    super(wav2vec2, self).__init__(*args, **kwargs)
+   
+    self.num_enc_layer = num_enc_layer
+
+  def build(self, input_shape):
+    self.fe = featencoder()
+    self.fp = featproj()
+
+    self.masked_spec_embed = self.add_weight(
+      shape=(768,), name="masked_spec_embed")
+    self.enc = encoder(self.num_enc_layer)
+  
+  def call(self, inputs, training=None):
+    mask_time_indices = None
+
+    if isinstance(inputs, tuple):
+      x, mask_time_indices = inputs
+
+    else:
+      x = inputs
+
+    x = self.fe(tf_expd(x, -1))
+    x, x_feat = self.fp(x)
+    if mask_time_indices is not None:
+      _mask = tf_expd(mask_time_indices, -1)
+      x = self.masked_spec_embed * _mask + x * (1. - _mask)
+
+    encs = self.enc(x)
+    return encs, x_feat
+
+class wav2vec2_seq(tf.keras.layers.Layer):
+  def __init__(self, *args, **kwargs):
+    super(wav2vec2_seq, self).__init__(*args, **kwargs)
+
+  def build(self, input_shape):
+    self.wav2vec2 = wav2vec2(12)
+
+    self.project_hid = tf.keras.layers.Dense(256, use_bias=True)
+    self.project_q = tf.keras.layers.Dense(256, use_bias=True)
+    self.quantizer = gumbel.gumbelq()
+
+    self.cossim = tf.keras.losses.CosineSimilarity(axis=-1, reduction='none')
+    self.temperature = 0.1
+
+    self.cce = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True, reduction='none')
+  
+  def call(self, inputs, training=None):
+    mask_time_indices = None
+    sampled_negative_indices = None
+
+    if isinstance(inputs, tuple) and len(inputs) == 3:
+      x, mask_time_indices, sampled_negative_indices = inputs
+    
+    elif isinstance(inputs, tuple) and len(inputs) == 2:
+      x, mask_time_indices = inputs
+
+    else:
+      x = inputs
+
+    encs, x_feat = self.wav2vec2((x, mask_time_indices))
+    x = encs[-1]
+
+    x = self.project_hid(x)
+    qx_feat, perp = self.quantizer((x_feat, mask_time_indices), training=training)
+    qx_feat = self.project_q(qx_feat)
+
+    if sampled_negative_indices is None:
+      return x, qx_feat
+
+    batch_size, seq_len, hdim = tf.shape(qx_feat)[0], tf.shape(qx_feat)[1], tf.shape(qx_feat)[2]
+
+    neg_qx_feat = tf.gather(
+      tf.reshape(qx_feat, [-1, hdim]),
+      tf.reshape(sampled_negative_indices, -1))
+
+    neg_qx_feat = tf.reshape(neg_qx_feat, [batch_size, seq_len, -1, hdim])
+    neg_qx_feat = tf.transpose(neg_qx_feat, [2, 0, 1, 3])
+
+    qx_logits = -self.cossim(x, tf_expd(qx_feat, 0)) / self.temperature
+    neg_qx_logits = -self.cossim(x, neg_qx_feat) / self.temperature
+
+    neg_is_pos = tf.math.reduce_all(qx_feat == neg_qx_feat, -1)
+    if tf.math.reduce_any(neg_is_pos):
+      neg_qx_logits = tf.where(neg_is_pos,
+        tf.ones_like(neg_qx_logits) * (-np.inf), neg_qx_logits)
+
+    logits = tf.concat([qx_logits, neg_qx_logits], 0)
+    logits = tf.transpose(logits, [2, 1, 0])
+    logits = tf.reshape(logits, [-1, tf.shape(logits)[-1]])
+
+    mask_loss = tf.transpose(mask_time_indices, [1, 0])
+    mask_loss = tf.reshape(mask_loss, [-1])
+    cont_loss = self.cce(tf.zeros_like(mask_loss), logits)
+    cont_loss = tf.math.reduce_sum(cont_loss * mask_loss)
+
+    num_codevectors = 640
+    div_loss = ((num_codevectors - perp) / num_codevectors)
+    div_loss *= tf.math.reduce_sum(mask_time_indices)
+
+    loss = cont_loss + 0.1 * div_loss 
+      
+    return x, qx_feat, loss
+
+class wav2vec2_phone(tf.keras.layers.Layer):
+  def __init__(self, 
+               num_enc_layer=1,
+               *args, **kwargs):
+    super(wav2vec2_phone, self).__init__(*args, **kwargs)
+    
+    self.num_enc_layer = num_enc_layer
+
+    self.layer = 7
+    self.dims = [64 for _ in range(self.layer)]
+    self.strides = [5, 2, 2, 2, 2, 2, 2]
+    self.ksizes = [10, 5, 5, 5, 5, 5, 5] #[10, 3, 3, 3, 3, 2, 2]
+    self.sublayer = 4
+
+  def build(self, input_shape):
+    conv_opt = dict(padding='same', use_bias=False)
+
+    if isinstance(input_shape, tuple):
+      self.ref_len = input_shape[0][1]
+    
+    else:
+      self.ref_len = input_shape[1]
+
+    self.wav2vec2 = wav2vec2(self.num_enc_layer)
+    
+    self.conv_post = conv1d(1, 16, **conv_opt)
+  
+  def call(self, inputs, training=None):
+    if isinstance(inputs, tuple):
+      x, ref = inputs
+
+    else:
+      x = inputs
+      ref = None
+
+    encs = self.wav2vec2(x)
+    x = encs[-1]
+
+    x = gelu(x)
+    #x = tf.stop_gradient(x)
+    
+    x = self.conv_post(x)
+    x = tf.math.tanh(x)
+    x = tf.squeeze(x, -1)
+
+    if ref is not None:
+      samp_loss = tf.math.reduce_mean((x - ref) ** 2)
+
+      def stft_loss(x, ref, frame_length, frame_step, fft_length):
+        stft_opt = dict(frame_length=frame_length,
+          frame_step=frame_step, fft_length=fft_length)
+        mag_x = tf.math.abs(stft(x, **stft_opt))
+        mag_ref = tf.math.abs(stft(ref, **stft_opt))
+
+        fro_opt = dict(axis=(-2, -1), ord='fro')
+        sc_loss = tf.norm(mag_x - mag_ref, **fro_opt) / (tf.norm(mag_x, **fro_opt) + 1e-9)
+        sc_loss = tf.reduce_mean(sc_loss)
+
+        mag_loss = tf.math.log(mag_x + 1e-9) - tf.math.log(mag_ref + 1e-9)
+        mag_loss = tf.reduce_mean(tf.math.abs(mag_loss))
+
+        return sc_loss + mag_loss
+
+      spec_loss = stft_loss(x, ref, 25, 5, 1024)
+      spec_loss += stft_loss(x, ref, 50, 10, 2048)
+      spec_loss += stft_loss(x, ref, 10, 2, 512)
+
+      return samp_loss + spec_loss
+
+    return x
