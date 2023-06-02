@@ -1,7 +1,7 @@
 import soundfile
 import numpy as np
 
-pcm, _ = soundfile.read("/home/hejung/s3prl/s3prl/downstream/speech_commands/dummy_data/train/yes/01d22d03_nohash_0.wav")
+pcm, _ = soundfile.read("01d22d03_nohash_0.wav")
 pcm2 = pcm / 2.
 pcms = np.concatenate([pcm.reshape([1, -1]), pcm2.reshape([1, -1])], 0).astype(np.float32)
 
