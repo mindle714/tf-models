@@ -8,10 +8,12 @@ tf_sum = tf.math.reduce_sum
 tf_expd = tf.expand_dims
 gelu = tf.keras.activations.gelu
 
-def sample_negative_indices(batch_size, seq_len,
-                            num_neg, mask_time_indices):
+def sample_negative_indices(batch_size, seq_len, 
+                            mask_time_indices = None, num_neg = 100):
   if mask_time_indices is None:
     mask_time_indices = tf.ones((batch_size, seq_len))
+  else:
+    mask_time_indices = tf.cast(mask_time_indices, tf.int32)
 
   neg_indices = []
   for idx in range(batch_size):
@@ -22,14 +24,14 @@ def sample_negative_indices(batch_size, seq_len,
     feat_indices = tf.tile(feat_indices, [1, num_neg])
 
     sampled_indices = tf.random.uniform(
-      (high + 1, num_negatives), 0, high, dtype=tf.int32)
+      (high + 1, num_neg), 0, high, dtype=tf.int32)
     sampled_indices = tf.where(sampled_indices >= feat_indices,
       sampled_indices + 1, sampled_indices)
 
     _updates = tf.gather(mapped_masked_indices, sampled_indices)      
     _neg_indices = tf.scatter_nd(
       tf.where(mask_time_indices[idx]), _updates, [seq_len, num_neg])
-    _neg_indices += idx * seq_len
+    _neg_indices += tf.cast(idx * seq_len, _neg_indices.dtype)
     neg_indices.append(_neg_indices)
 
   neg_indices = tf.concat([
@@ -310,7 +312,7 @@ class wav2vec2_seq(tf.keras.layers.Layer):
 
     neg_qx_feat = tf.gather(
       tf.reshape(qx_feat, [-1, hdim]),
-      tf.reshape(sampled_negative_indices, -1))
+      tf.reshape(sampled_negative_indices, [-1]))
 
     neg_qx_feat = tf.reshape(neg_qx_feat, [batch_size, seq_len, -1, hdim])
     neg_qx_feat = tf.transpose(neg_qx_feat, [2, 0, 1, 3])
@@ -367,12 +369,14 @@ class wav2vec2_phone(tf.keras.layers.Layer):
       x = inputs
       ref = None
 
+    x_feat = x
     encs, _, _ = self.wav2vec2(x, training=training)
     #x = encs[-1]
     x = sum(encs)
+    if stop_grad:
+      x = tf.stop_gradient(x)
 
     x = gelu(x)
-    #x = tf.stop_gradient(x)
     
     x = self.proj(x)
     # TODO in s3prl, no activation between two linear layers
@@ -381,7 +385,17 @@ class wav2vec2_phone(tf.keras.layers.Layer):
     if ref is not None:
       seq_loss = 0.
       if ssl_loss:
-        pass
+        batch_size = x.shape[0]
+
+        mask_time_indices = mask.compute_mask_indices(
+          batch_size, tf.shape(x)[1],
+          tf.cast(tf.sequence_mask(tf.squeeze(x_len, -1), tf.shape(x)[1]), tf.int32))
+
+        sampled_negative_indices = sample_negative_indices(
+          batch_size, tf.shape(x)[1], mask_time_indices)
+
+        _, _, seq_loss = self.wav2vec2(
+         (x_feat, mask_time_indices, sampled_negative_indices), training=training)
 
       if ctc:
         ctc_loss = _ctc_loss(
