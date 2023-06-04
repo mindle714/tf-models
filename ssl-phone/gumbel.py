@@ -3,11 +3,8 @@ import tensorflow_probability as tfp
 import numpy as np
 
 def gumbel_softmax(x, tau, hard = False, dim = -1):
-  '''
   gumbels = tfp.distributions.Exponential(1.).sample(tf.shape(x))
   gumbels = -tf.math.log(gumbels) # Gumbel(0, 1)
-  '''
-  gumbels = np.load('gumbels.npy')
   gumbels = (x + gumbels) / tau # Gumbel(logits, tau)
   y_soft = tf.nn.softmax(gumbels, dim)
 

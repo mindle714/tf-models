@@ -6,6 +6,8 @@ parser.add_argument("--num-chunks", type=int, required=False, default=100)
 parser.add_argument("--samp-rate", type=int, required=False, default=16000)
 parser.add_argument("--samp-len", type=int, required=False, default=272000)
 parser.add_argument("--text-len", type=int, required=False, default=None)
+parser.add_argument("--no-spec", action='store_true')
+parser.add_argument("--norm", action='store_true')
 parser.add_argument("--output", type=str, required=True) 
 args = parser.parse_args()
 
@@ -83,7 +85,6 @@ import tensorflow as tf
 import multiprocessing
 import numpy as np
 import copy
-import soundfile
 import librosa
 import tqdm
 import parse_data
@@ -96,28 +97,32 @@ def get_feats(pcm, txt):
       np.ones(_len-len(_in), dtype=_in.dtype) * val], 0)
 
   pcm_len = len(pcm); txt_len = len(txt)
+  if args.norm:
+    pcm = (pcm - np.mean(pcm)) / (np.std(pcm) + 1e-9)
+
   _pcm = pad(pcm, args.samp_len, 0)
   _txt = pad(np.array(txt), max_text_len, 0)
-
-  _dict = {'pcm': np.expand_dims(_pcm, 0).astype(np.float32), 'pcm_len':pcm_len}
-  _spec_dict = parse_data.conv_spec(_dict)
-  _spec = np.squeeze(_spec_dict['spec'], 0)
-  _spec = np.reshape(_spec, [-1])
-  spec_len = _spec_dict['spec_len']
-
-#  pcm_feat = tf.train.Feature(float_list=tf.train.FloatList(value=_pcm))
-  spec_feat = tf.train.Feature(float_list=tf.train.FloatList(value=_spec))
+    
   txt_feat = tf.train.Feature(int64_list=tf.train.Int64List(value=_txt))
-#  pcm_len_feat = tf.train.Feature(int64_list=tf.train.Int64List(value=[pcm_len]))
-  spec_len_feat = tf.train.Feature(int64_list=tf.train.Int64List(value=[spec_len]))
   txt_len_feat = tf.train.Feature(int64_list=tf.train.Int64List(value=[txt_len]))
+  feats = {'txt': txt_feat, 'txt_len': txt_len_feat}
 
-#  feats = {'pcm': pcm_feat, 'txt': txt_feat, 
-#          'pcm_len': pcm_len_feat, 'txt_len': txt_len_feat}
-  feats = {
-    'spec': spec_feat, 'txt': txt_feat, 
-    'spec_len': spec_len_feat, 'txt_len': txt_len_feat
-  }
+  if not args.no_spec:
+    _dict = {'pcm': np.expand_dims(_pcm, 0).astype(np.float32), 'pcm_len':pcm_len}
+    _spec_dict = parse_data.conv_spec(_dict)
+    _spec = np.squeeze(_spec_dict['spec'], 0)
+    _spec = np.reshape(_spec, [-1])
+    spec_len = _spec_dict['spec_len']
+
+    spec_feat = tf.train.Feature(float_list=tf.train.FloatList(value=_spec))
+    spec_len_feat = tf.train.Feature(int64_list=tf.train.Int64List(value=[spec_len]))
+    feats['spec'] = spec_feat; feats['spec_len'] = spec_len_feat
+
+  else:
+    pcm_feat = tf.train.Feature(float_list=tf.train.FloatList(value=_pcm))
+    pcm_len_feat = tf.train.Feature(int64_list=tf.train.Int64List(value=[pcm_len]))
+    feats['pcm'] = pcm_feat; feats['pcm_len'] = pcm_len_feat
+
   ex = tf.train.Example(features=tf.train.Features(feature=feats))
   return ex.SerializeToString()
 

@@ -1,6 +1,8 @@
 import tensorflow as tf
 from util import *
 import gumbel
+import mask
+from tf_seq2seq_losses import classic_ctc_loss as _ctc_loss
 
 tf_sum = tf.math.reduce_sum
 tf_expd = tf.expand_dims
@@ -19,16 +21,8 @@ def sample_negative_indices(batch_size, seq_len,
     feat_indices = tf.expand_dims(tf.range(high + 1, dtype=tf.int32) , -1)
     feat_indices = tf.tile(feat_indices, [1, num_neg])
 
-    '''
     sampled_indices = tf.random.uniform(
       (high + 1, num_negatives), 0, high, dtype=tf.int32)
-    '''
-    if idx == 0:
-      sampled_indices = np.load('sampled_indices_0.npy')
-      sampled_indices = tf.constant(sampled_indices, dtype=tf.int32)
-    else:
-      sampled_indices = np.load('sampled_indices_1.npy')
-      sampled_indices = tf.constant(sampled_indices, dtype=tf.int32)
     sampled_indices = tf.where(sampled_indices >= feat_indices,
       sampled_indices + 1, sampled_indices)
 
@@ -273,11 +267,12 @@ class wav2vec2(tf.keras.layers.Layer):
     return encs, x_feat
 
 class wav2vec2_seq(tf.keras.layers.Layer):
-  def __init__(self, *args, **kwargs):
+  def __init__(self, num_enc_layer=12, *args, **kwargs):
     super(wav2vec2_seq, self).__init__(*args, **kwargs)
+    self.num_enc_layer = num_enc_layer
 
   def build(self, input_shape):
-    self.wav2vec2 = wav2vec2(12)
+    self.wav2vec2 = wav2vec2(self.num_enc_layer)
 
     self.project_hid = tf.keras.layers.Dense(256, use_bias=True)
     self.project_q = tf.keras.layers.Dense(256, use_bias=True)
@@ -309,7 +304,7 @@ class wav2vec2_seq(tf.keras.layers.Layer):
     qx_feat = self.project_q(qx_feat)
 
     if sampled_negative_indices is None:
-      return x, qx_feat
+      return encs, x, qx_feat
 
     batch_size, seq_len, hdim = tf.shape(qx_feat)[0], tf.shape(qx_feat)[1], tf.shape(qx_feat)[2]
 
@@ -347,71 +342,68 @@ class wav2vec2_seq(tf.keras.layers.Layer):
 
 class wav2vec2_phone(tf.keras.layers.Layer):
   def __init__(self, 
-               num_enc_layer=1,
+               num_enc_layer=12, num_class=74,
                *args, **kwargs):
     super(wav2vec2_phone, self).__init__(*args, **kwargs)
     
     self.num_enc_layer = num_enc_layer
-
-    self.layer = 7
-    self.dims = [64 for _ in range(self.layer)]
-    self.strides = [5, 2, 2, 2, 2, 2, 2]
-    self.ksizes = [10, 5, 5, 5, 5, 5, 5] #[10, 3, 3, 3, 3, 2, 2]
-    self.sublayer = 4
+    self.num_class = num_class
 
   def build(self, input_shape):
     conv_opt = dict(padding='same', use_bias=False)
 
-    if isinstance(input_shape, tuple):
-      self.ref_len = input_shape[0][1]
+    self.wav2vec2 = wav2vec2_seq(self.num_enc_layer)
     
-    else:
-      self.ref_len = input_shape[1]
-
-    self.wav2vec2 = wav2vec2(self.num_enc_layer)
+    self.proj = tf.keras.layers.Dense(256, use_bias=True)
+    self.linear = tf.keras.layers.Dense(self.num_class, use_bias=True)
     
-    self.conv_post = conv1d(1, 16, **conv_opt)
-  
-  def call(self, inputs, training=None):
-    if isinstance(inputs, tuple):
-      x, ref = inputs
+  def call(self, inputs, training=None,
+           ssl_loss=False, stop_grad=False, ctc=True):
+    if isinstance(inputs, tuple) and len(inputs) == 4:
+      x, ref, x_len, ref_len = inputs
+      x_len = mask.get_feat_extract_output_length(x_len)
 
     else:
       x = inputs
       ref = None
 
-    encs = self.wav2vec2(x)
-    x = encs[-1]
+    encs, _, _ = self.wav2vec2(x, training=training)
+    #x = encs[-1]
+    x = sum(encs)
 
     x = gelu(x)
     #x = tf.stop_gradient(x)
     
-    x = self.conv_post(x)
-    x = tf.math.tanh(x)
-    x = tf.squeeze(x, -1)
+    x = self.proj(x)
+    # TODO in s3prl, no activation between two linear layers
+    x = self.linear(x)
 
     if ref is not None:
-      samp_loss = tf.math.reduce_mean((x - ref) ** 2)
+      seq_loss = 0.
+      if ssl_loss:
+        pass
 
-      def stft_loss(x, ref, frame_length, frame_step, fft_length):
-        stft_opt = dict(frame_length=frame_length,
-          frame_step=frame_step, fft_length=fft_length)
-        mag_x = tf.math.abs(stft(x, **stft_opt))
-        mag_ref = tf.math.abs(stft(ref, **stft_opt))
+      if ctc:
+        ctc_loss = _ctc_loss(
+          tf.cast(ref, tf.int32), x, 
+          tf.squeeze(tf.cast(ref_len, tf.int32), -1), 
+          tf.squeeze(tf.cast(x_len, tf.int32), -1), 
+          blank_index=0)
 
-        fro_opt = dict(axis=(-2, -1), ord='fro')
-        sc_loss = tf.norm(mag_x - mag_ref, **fro_opt) / (tf.norm(mag_x, **fro_opt) + 1e-9)
-        sc_loss = tf.reduce_mean(sc_loss)
+        return ctc_loss, seq_loss
 
-        mag_loss = tf.math.log(mag_x + 1e-9) - tf.math.log(mag_ref + 1e-9)
-        mag_loss = tf.reduce_mean(tf.math.abs(mag_loss))
+      else:
+        ce_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
+          tf.cast(ref, tf.int32), x)
 
-        return sc_loss + mag_loss
+        _ref_len = tf.squeeze(ref_len, -1)
+        ce_mask = tf.sequence_mask(_ref_len, tf.shape(x)[1])
+        ce_mask = tf.cast(ce_mask, x.dtype)
 
-      spec_loss = stft_loss(x, ref, 25, 5, 1024)
-      spec_loss += stft_loss(x, ref, 50, 10, 2048)
-      spec_loss += stft_loss(x, ref, 10, 2, 512)
+        ce_loss = ce_loss * ce_mask
+        ce_loss = tf.math.reduce_sum(ce_loss, -1)
+        ce_loss /= (tf.cast(_ref_len, x.dtype) + 1e-9)
 
-      return samp_loss + spec_loss
+        return ce_loss, seq_loss
 
     return x

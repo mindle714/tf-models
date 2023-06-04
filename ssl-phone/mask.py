@@ -109,8 +109,8 @@ assert get_feat_extract_output_length(16000) == 49
 
 def compute_mask_indices(batch_size, seq_len, attention_mask = None,
                          mask_prob = 0.05, mask_len = 10, min_masks = 2):
-#  epsilon = tf.random.uniform(())
-  epsilon = 0.1915194503788923 
+  epsilon = tf.random.uniform(())
+#  epsilon = 0.1915194503788923 
 
   def compute_num_span(input_len):
     num_span = mask_prob * tf.cast(input_len, tf.float32) / tf.cast(mask_len, tf.float32) + epsilon
@@ -140,9 +140,9 @@ def compute_mask_indices(batch_size, seq_len, attention_mask = None,
     input_len = input_lens[idx]
 
     num_span = compute_num_span(input_len)
-#    mask_idx = tf.random.shuffle(tf.range(input_len - (mask_len - 1)))[:num_span]
-    if idx == 0: mask_idx = tf.constant([37, 45,  6, 44, 13])
-    else: mask_idx = tf.constant([43, 28, 33, 44, 12])
+    mask_idx = tf.random.shuffle(tf.range(input_len - (mask_len - 1)))[:num_span]
+#    if idx == 0: mask_idx = tf.constant([37, 45,  6, 44, 13])
+#    else: mask_idx = tf.constant([43, 28, 33, 44, 12])
 
     if num_span == 0:
       dummy_mask_idx = seq_len - 1
