@@ -104,9 +104,6 @@ class posconvemb(tf.keras.layers.Layer):
   
   def call(self, inputs, training=None):
     x = inputs
-    #shape = [tf.shape(x)[0], 64, tf.shape(x)[-1]]
-    #pad = tf.zeros(shape)
-    #x_pad = tf.concat([pad, x, pad], 1)
     x_pad = tf.pad(x, tf.constant([[0, 0], [64, 64], [0, 0]]), "CONSTANT")
     return gelu(self.conv(x_pad)[:,:-1,:])
 

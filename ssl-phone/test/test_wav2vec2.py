@@ -3,7 +3,14 @@ import numpy as np
 
 pcm, _ = soundfile.read("01d22d03_nohash_0.wav")
 pcm2 = pcm / 2.
-pcms = np.concatenate([pcm.reshape([1, -1]), pcm2.reshape([1, -1])], 0).astype(np.float32)
+#pcms = np.concatenate([
+#    pcm.reshape([1, -1]), pcm2.reshape([1, -1])], 0).astype(np.float32)
+pcms = np.concatenate([
+    pcm.reshape([1, -1]), pcm2.reshape([1, -1]),
+    pcm.reshape([1, -1]), pcm2.reshape([1, -1]),
+    pcm.reshape([1, -1]), pcm2.reshape([1, -1]),
+    pcm.reshape([1, -1]), pcm2.reshape([1, -1]),
+    ], 0).astype(np.float32)
 
 import tensorflow as tf
 
@@ -91,10 +98,17 @@ mask_time_indices = mask.compute_mask_indices(
 
 #sampled_negative_indices = np.load('sampled_negative_indices.npy')
 sampled_negative_indices = sample_negative_indices(
-  _in.shape[0], seq_len, 100, mask_time_indices)  
+  _in.shape[0], seq_len, mask_time_indices, 100)
 
 x, qx_feat, loss = model((_in, mask_time_indices, sampled_negative_indices), training=True)
 print(x, qx_feat, loss)
+
+import tensorflow_probability as tfp
+import matplotlib.pyplot as plt
+gumbels = tfp.distributions.Exponential(1.).sample([784, 320])
+gumbels = -tf.math.log(gumbels) # Gumbel(0, 1)
+plt.hist(gumbels)
+plt.savefig('gumbels_tf.png')
 
 '''
 (venv3-s3prl) hejung@speecht7:~/tf-models/ssl-phone/test$ python3 test_wav2vec2.py

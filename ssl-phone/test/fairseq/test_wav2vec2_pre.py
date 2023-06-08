@@ -21,7 +21,14 @@ print(model)
 import soundfile
 pcm, _ = soundfile.read("01d22d03_nohash_0.wav")
 pcm2 = pcm / 2.
-pcms = np.concatenate([pcm.reshape([1, -1]), pcm2.reshape([1, -1])], 0).astype(np.float32)
+#pcms = np.concatenate([
+#    pcm.reshape([1, -1]), pcm2.reshape([1, -1])], 0).astype(np.float32)
+pcms = np.concatenate([
+    pcm.reshape([1, -1]), pcm2.reshape([1, -1]),
+    pcm.reshape([1, -1]), pcm2.reshape([1, -1]),
+    pcm.reshape([1, -1]), pcm2.reshape([1, -1]),
+    pcm.reshape([1, -1]), pcm2.reshape([1, -1]),
+    ], 0).astype(np.float32)
 
 #input_values = feature_extractor(pcm, return_tensors="pt").input_values
 input_values = torch.from_numpy(pcms)
@@ -47,8 +54,16 @@ outputs = model(input_values,
     mask_time_indices=mask_time_indices,
     sampled_negative_indices=sampled_negative_indices,
     output_hidden_states=True)
+print(outputs)
 
 # compute cosine similarity between predicted (=projected_states) and target (=projected_quantized_states)
 cosine_sim = torch.cosine_similarity(outputs.projected_states, outputs.projected_quantized_states, dim=-1)
-print(cosine_sim)
-print(cosine_sim[mask_time_indices.to(torch.bool)].mean())
+#print(cosine_sim)
+#print(cosine_sim[mask_time_indices.to(torch.bool)].mean())
+
+import matplotlib.pyplot as plt
+gumbels = (
+    -torch.empty([784, 320]).exponential_().log()
+).cpu().numpy()
+plt.hist(gumbels)
+plt.savefig('gumbels_torch.png')
