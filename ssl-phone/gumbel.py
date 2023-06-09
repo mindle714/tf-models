@@ -38,7 +38,7 @@ class gumbelq(tf.keras.layers.Layer):
     self.num_groups = 2
     self.num_vars = 320
     self.codevector_dim = 256
-    self.temperature = 2
+    self.temperature = 0.5 # originally 2 but decayed to 0.5 according to the paper
 
     super(gumbelq, self).__init__(*args, **kwargs)
   
