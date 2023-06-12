@@ -89,7 +89,7 @@ import model
 m = model.convtas()
 
 specs = [val.__spec__ for name, val in sys.modules.items() \
-  if isinstance(val, types.ModuleType)]
+  if isinstance(val, types.ModuleType) and not ('_main_' in name)]
 origins = [spec.origin for spec in specs if spec is not None]
 origins = [e for e in origins if e is not None and os.getcwd() in e]
 
