@@ -4,19 +4,11 @@ parser.add_argument("--ckpt", type=str, required=True)
 parser.add_argument("--beam-size", type=int, required=False, default=0)
 parser.add_argument("--chunk-len", type=int, required=False, default=272000)
 parser.add_argument("--pad-short", action="store_true")
-parser.add_argument("--timit", action='store_true')
 args = parser.parse_args()
 
 import os
 from os.path import join
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-
-if args.timit:
-  args.eval_list = "/data/hejung/timit/test.wav.phone"
-else:
-  args.eval_list = "/data/hejung/librispeech/test-clean.flac.phone"
-
-assert os.path.isfile(args.eval_list)
 
 import tensorflow as tf
 gpus = tf.config.list_physical_devices('GPU')
@@ -37,23 +29,50 @@ sys.path.insert(0, expdir)
 expname = expdir.split("/")[-1]
 epoch = os.path.basename(args.ckpt).replace(".", "-").split("-")[1]
 
+traincmd = open(os.path.join(expdir, "ARGS"), "r").readlines()[0].strip()
+timit = ("--timit" in traincmd)
+
+if timit:
+  args.eval_list = "/data/hejung/timit/test.wav.phone"
+else:
+  args.eval_list = "/data/hejung/librispeech/test-clean.flac.phone"
+
+assert os.path.isfile(args.eval_list)
+
 if os.path.exists(join(expdir, "tera.py")):
   import tera
   if os.path.dirname(tera.__file__) != expdir:
     sys.exit("tera is loaded from {}".format(tera.__file__))
-  if args.timit:
+  if timit:
     m = tera.tera_phone(num_class=50)
   else:
     m = tera.tera_phone()
+  is_tera = True
+
+elif os.path.exists(join(expdir, "wav2vec2.py")):
+  import wav2vec2
+  if os.path.dirname(wav2vec2.__file__) != expdir:
+    sys.exit("wav2vec2 is loaded from {}".format(wav2vec2.__file__))
+  if timit:
+    m = wav2vec2.wav2vec2_phone(num_class=50)
+  else:
+    m = wav2vec2.wav2vec2_phone()
+  is_tera = False
 
 else:
   assert False, "Invalid experiment path {}".format(expdir)
 
 import numpy as np
-if args.timit:
-  _in = np.zeros((1, 801, 80), dtype=np.float32)
+if is_tera:
+  if timit:
+    _in = np.zeros((1, 801, 80), dtype=np.float32)
+  else:
+    _in = np.zeros((1, 1701, 80), dtype=np.float32)
 else:
-  _in = np.zeros((1, 1701, 80), dtype=np.float32)
+  if timit:
+    _in = np.zeros((1, 128000), dtype=np.float32)
+  else:
+    _in = np.zeros((1, 272000), dtype=np.float32)
 _ = m(_in, training=False)
 
 ckpt = tf.train.Checkpoint(m)
@@ -76,6 +95,8 @@ def softmax(x):
 def eval(_pcm, chunk_len):
   pcm, _ = librosa.load(_pcm, sr = 16000)
   pcm_len = pcm.shape[0]
+  if chunk_len is None:
+    chunk_len = pcm_len
 
   hyps = []
   for idx in range(int(np.ceil(pcm_len / chunk_len))):
@@ -90,13 +111,21 @@ def eval(_pcm, chunk_len):
       else:
         if _pcm_len < 200: continue # if > n_fft//2, error in reflect pad
 
-    spec_dict = parse_data.conv_spec(
-      {'pcm': np.expand_dims(_pcm, 0).astype(np.float32), 'pcm_len':chunk_len})
+    if is_tera:
+      spec_dict = parse_data.conv_spec(
+        {'pcm': np.expand_dims(_pcm, 0).astype(np.float32), 'pcm_len':chunk_len})
 
-    _hyp  = m(spec_dict['spec'], training=False)
+      _hyp = m(spec_dict['spec'], training=False)
+
+    else:
+      _hyp = m(np.expand_dims(_pcm, 0).astype(np.float32), training=False)
+
     hyps.append(_hyp)
 
   hyp = np.concatenate(hyps, 1)
+
+  if timit:
+    return [str(e) for e in np.argmax(np.squeeze(hyp, 0), -1)]
 
   def greedy(hyp):
     truns = []; prev = 0
@@ -105,7 +134,6 @@ def eval(_pcm, chunk_len):
         if prev != 0: truns.append(prev)
       prev = idx
     if prev != 0: truns.append(prev)
-    if args.timit: return truns
     return tokenizer.decode(truns)
   
   if args.beam_size < 1:
@@ -153,14 +181,15 @@ resname = "{}-{}".format(expname, epoch)
 evals = [e.strip() for e in open(args.eval_list, "r").readlines()]
 pers = []
 
-if args.timit:
-  with open(join("results_timit", "{}.eval".format(resname)), "w") as f:
+if timit:
+  with open(join("results", "{}.eval".format(resname)), "w") as f:
     for idx, pcm_ref in enumerate(evals):
       _pcm = pcm_ref.split()[0]
       _ref = [int(e) for e in pcm_ref.split()[1:]]
       
-      hyp = eval(_pcm, args.chunk_len)
-      _per = metric.per([hyp], [_ref])
+      hyp = eval(_pcm, None)
+      _per = metric.per([" ".join(hyp)], 
+              [" ".join([str(e) for e in _ref])])
       pers.append(_per)
 
       f.write("{} {}\n".format(_per, " ".join(hyp)))
