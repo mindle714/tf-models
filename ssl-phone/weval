@@ -22,7 +22,7 @@ for exp in "${exps[@]}"; do
     continue
   fi
 
-  for epoch in $(seq 10000 10000 ${maxepoch}); do 
+  for epoch in $(seq 3000 3000 ${maxepoch}); do 
     if [ -f "results/$exp-${epoch}.eval" ]; then
       echo "$exp-${epoch}.eval already exists"
       continue

@@ -14,15 +14,17 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--tfrec", type=str, required=True) 
 parser.add_argument("--val-tfrec", type=str, required=False, default=None)
+parser.add_argument("--eval-list", type=str, required=False, 
+  default="/data/hejung/timit/test.wav.phone")
 parser.add_argument("--batch-size", type=int, required=False, default=8) 
 parser.add_argument("--accum-step", type=int, required=False, default=2)
 parser.add_argument("--eval-step", type=int, required=False, default=100) 
-parser.add_argument("--save-step", type=int, required=False, default=10000) 
+parser.add_argument("--save-step", type=int, required=False, default=100) 
 parser.add_argument("--val-step", type=int, required=False, default=5000) 
-parser.add_argument("--train-step", type=int, required=False, default=45000) 
+parser.add_argument("--train-step", type=int, required=False, default=2000) 
 parser.add_argument("--begin-lr", type=float, required=False, default=2e-4) 
 parser.add_argument("--lr-decay-rate", type=float, required=False, default=0.96)
-parser.add_argument("--lr-decay-step", type=float, required=False, default=4000)
+parser.add_argument("--lr-decay-step", type=float, required=False, default=300)
 parser.add_argument("--val-lr-update", type=float, required=False, default=3) 
 parser.add_argument("--ssl-weight", type=float, required=False, default=0)
 parser.add_argument("--ssl-decay", action='store_true')
@@ -38,8 +40,17 @@ parser.add_argument("--warm-start", type=str, required=False, default=None)
 parser.add_argument("--stop-grad", action='store_true')
 parser.add_argument("--from-init", action='store_true')
 parser.add_argument("--profile", action='store_true')
-parser.add_argument("--timit", action='store_true')
 args = parser.parse_args()
+
+import metric
+import soundfile
+assert os.path.isfile(args.eval_list)
+evals = [e.strip() for e in open(args.eval_list, "r").readlines()]
+eval_pcms = []
+for idx, pcm_ref in enumerate(evals):
+  _pcm = pcm_ref.split()[0]
+  _pcm, _ = soundfile.read(_pcm)
+  eval_pcms.append(_pcm)
 
 if args.end_ssl is None:
   args.end_ssl = args.train_step
@@ -137,9 +148,7 @@ import glob
 
 tfrec_list = glob.glob(os.path.join(args.tfrec, "train-*.tfrecord"))
 # TODO calculate on gen_data.py
-spec_len = 1701
-if args.timit:
-  spec_len = 801
+spec_len = 801
 dataset = parse_data.gen_train(tfrec_list, spec_len, txt_len,
   batch_size=args.batch_size, seed=seed)
 
@@ -153,14 +162,11 @@ lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
 import tera
-if args.timit:
-  m = tera.tera_phone(num_class=50)
-else:
-  m = tera.tera_phone()
+m = tera.tera_phone(num_class=50, use_last=True)
 
 if args.accum_step > 1:
   _in = np.zeros((args.batch_size, spec_len, 80), dtype=np.float32)
-  _ = m(_in, ctc = (not args.timit))
+  _ = m(_in, ctc = False)
   accum_grads = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights]
 
 specs = [val.__spec__ for name, val in sys.modules.items() \
@@ -187,7 +193,7 @@ def run_step(step, spec, txt, spec_len, txt_len,
       training=training, 
       ssl_loss = (not (args.ssl_weight == 0)),
       stop_grad=stop_grad,
-      ctc = (not args.timit))
+      ctc = False)
 
     loss = tf.math.reduce_mean(loss)
     tf.summary.scalar("loss", loss, step=step)
@@ -236,6 +242,11 @@ def run_step(step, spec, txt, spec_len, txt_len,
           accum_grads[idx].assign(tf.zeros_like(grad))
 
   return loss, sloss, ssl_weight
+
+def run_eval_step(pcm, pcm_len):
+  spec_dict = parse_data.conv_spec({'pcm': pcm, 'pcm_len': pcm_len})
+  _hyp = m(spec_dict['spec'], training=False)
+  return _hyp
 
 import logging
 logger = tf.get_logger()
@@ -320,8 +331,30 @@ for idx, data in enumerate(dataset):
   tf.summary.scalar("lr", lr, step=idx)
 
   if idx > init_epoch and idx % args.eval_step == 0:
-    logger.info("gstep[{}] loss[{:.2f}] sloss[{:.2f}] lr[{:.2e}] sr[{:.2e}]".format(
-      idx, loss, sloss, lr.numpy(), sw))
+    pers = []
+    expname = [e for e in args.output.split("/") if len(e) > 0][-1]
+    resname = "{}-{}".format(expname, idx)
+
+    with open(os.path.join("results", "{}.eval".format(resname)), "w") as f:
+      for _pcm, pcm_ref in zip(eval_pcms, evals):
+        _pcm_len = _pcm.shape[0]
+        _pcm = np.expand_dims(_pcm, 0).astype(np.float32)
+
+        hyp = run_eval_step(_pcm, tf.cast(_pcm_len, tf.int64))
+        hyp = [str(e) for e in np.argmax(np.squeeze(hyp.numpy(), 0), -1)]
+        
+        _ref = [int(e) for e in pcm_ref.split()[1:]]
+        _per = metric.per([" ".join(hyp[:len(_ref)])], 
+          [" ".join([str(e) for e in _ref])])
+        pers.append(_per)
+      
+        f.write("{} {}\n".format(_per, " ".join(hyp)))
+        f.flush()
+    
+      f.write("final: {}\n".format(np.mean(pers)))
+
+    logger.info("gstep[{}] loss[{:.2f}] sloss[{:.2f}] lr[{:.2e}] sr[{:.2e}] per[{:.4f}]".format(
+      idx, loss, sloss, lr.numpy(), sw, np.mean(pers)))
 
   if val_dataset is None:
     if args.accum_step == 1 or not accum:

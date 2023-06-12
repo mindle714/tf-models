@@ -1,6 +1,7 @@
 __pycache__/
 exps/
 libriphone/
+libriphone_v4/
 *.ckpt.*
 *.wav
 results/
