@@ -105,6 +105,23 @@ def get_feat_extract_output_length(input_len):
 
   return input_len
 
+def get_feat_extract_ksize_stride(input_len):
+  ksizes = [10, 3, 3, 3, 3, 2, 2]
+  strides = [5, 2, 2, 2, 2, 2, 2]
+  assert len(ksizes) == len(strides)
+
+  _ksize = None; _stride = 1
+
+  for idx in range(len(ksizes)):
+    if _ksize is None:
+      _ksize = ksizes[idx]
+    else:
+      _ksize = (ksizes[idx] - 1) * _stride + _ksize
+    
+    _stride *= strides[idx]
+
+  return _ksize, _stride
+
 assert get_feat_extract_output_length(16000) == 49 
 
 def compute_mask_indices(batch_size, seq_len, attention_mask = None,

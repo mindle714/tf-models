@@ -382,12 +382,13 @@ class wav2vec2_seq(tf.keras.layers.Layer):
 
 class wav2vec2_phone(tf.keras.layers.Layer):
   def __init__(self, 
-               num_enc_layer=12, num_class=74,
+               num_enc_layer=12, num_class=74, use_last=False,
                *args, **kwargs):
     super(wav2vec2_phone, self).__init__(*args, **kwargs)
     
     self.num_enc_layer = num_enc_layer
     self.num_class = num_class
+    self.use_last = use_last
 
   def build(self, input_shape):
     conv_opt = dict(padding='same', use_bias=False)
@@ -399,24 +400,34 @@ class wav2vec2_phone(tf.keras.layers.Layer):
     
   def call(self, inputs, training=None,
            ssl_loss=False, stop_grad=False, ctc=True):
-    if isinstance(inputs, tuple) and len(inputs) == 4:
-      x, ref, x_len, ref_len = inputs
+    if isinstance(inputs, tuple) and (len(inputs) == 6 or len(inputs) == 4):
+      if len(inputs) == 6:
+        x, x_feat, ref, x_len, x_feat_len, ref_len = inputs
+
+      else:
+        x, ref, x_len, ref_len = inputs
+        x_feat = x; x_feat_len = x_len
 
       max_x_len = mask.get_feat_extract_output_length(tf.shape(x)[1])
       x_len = mask.get_feat_extract_output_length(x_len)
       attn_mask = tf.sequence_mask(tf.squeeze(x_len, -1), max_x_len)
-      attn_mask = tf.cast(attn_mask, dtype=tf.float32)
-      attn_mask = 1. - attn_mask
+      attn_mask = 1. - tf.cast(attn_mask, dtype=tf.float32)
       attn_mask *= -1e9
 
     else:
       x = inputs
-      ref = None
+      x_len = None
+      x_feat = None; x_feat_len = None
+      ref = None; ref_len = None
       attn_mask = None
 
-    encs, x_feat = self.wav2vec2((x, attn_mask), training=training)
-    #x = encs[-1]
-    x = sum(encs)
+    encs, _ = self.wav2vec2((x, attn_mask), training=training)
+
+    if self.use_last:
+      x = encs[-1]
+    else:
+      x = sum(encs)
+
     if stop_grad:
       x = tf.stop_gradient(x)
 
@@ -428,25 +439,33 @@ class wav2vec2_phone(tf.keras.layers.Layer):
 
     if ref is not None:
       seq_loss = 0.
+
       if ssl_loss:
-        batch_size = x.shape[0]
+        batch_size = x_feat.shape[0]
+      
+        max_x_feat_len = mask.get_feat_extract_output_length(tf.shape(x_feat)[1])
+        x_feat_len = mask.get_feat_extract_output_length(x_feat_len)
+        feat_attn_mask = tf.sequence_mask(tf.squeeze(x_feat_len, -1), max_x_feat_len)
 
         mask_time_indices = mask.compute_mask_indices(
-          batch_size, tf.shape(x)[1],
-          tf.cast(tf.sequence_mask(tf.squeeze(x_len, -1), tf.shape(x)[1]), tf.int32))
+          batch_size, max_x_feat_len,
+          tf.cast(feat_attn_mask, tf.int32))
 
         sampled_negative_indices = sample_negative_indices(
-          batch_size, tf.shape(x)[1], mask_time_indices)
+          batch_size, max_x_feat_len, mask_time_indices)
+        
+        feat_attn_mask = 1. - tf.cast(feat_attn_mask, dtype=tf.float32)
+        feat_attn_mask *= -1e9
 
         seq_loss = self.wav2vec2(
-         ((encs, x_feat), mask_time_indices, sampled_negative_indices, attn_mask), training=training)
+         (x_feat, mask_time_indices, sampled_negative_indices, feat_attn_mask), training=training)
 
       if ctc:
         ctc_loss = _ctc_loss(
           tf.cast(ref, tf.int32), x, 
           tf.squeeze(tf.cast(ref_len, tf.int32), -1), 
           tf.squeeze(tf.cast(x_len, tf.int32), -1), 
-          blank_index=0)
+          blank_index = 0)
 
         return ctc_loss, seq_loss
 
@@ -459,8 +478,9 @@ class wav2vec2_phone(tf.keras.layers.Layer):
         ce_mask = tf.cast(ce_mask, x.dtype)
 
         ce_loss = ce_loss * ce_mask
-        ce_loss = tf.math.reduce_sum(ce_loss, -1)
-        ce_loss /= (tf.cast(_ref_len, x.dtype) + 1e-9)
+        # instead of sample-wise masking, do batch-wise
+        ce_loss = tf.math.reduce_sum(ce_loss)
+        ce_loss /= (tf.math.reduce_sum(ce_mask) + 1e-9)
 
         return ce_loss, seq_loss
 
