@@ -131,11 +131,13 @@ class attention(tf.keras.layers.Layer):
   
   def call(self, inputs, training=None):
     if isinstance(inputs, tuple):
-      x_k, x_q = inputs
+      x, attn_mask = inputs
 
     else:
       x = inputs
-      x_k = x; x_q = x
+      attn_mask = None
+    
+    x_k = x; x_q = x
 
     def reshape(e):
       e = tf.reshape(e,
@@ -150,6 +152,13 @@ class attention(tf.keras.layers.Layer):
     v = reshape(self.v_proj(x_q))
 
     attn_weights = tf.linalg.matmul(q, k, transpose_b=True)
+    if attn_mask is not None:
+      attn_mask = tf_expd(tf_expd(attn_mask, 1), 1)
+      attn_mask = tf.tile(attn_mask, [1, self.num_heads, 1, 1])
+      attn_mask = tf.reshape(attn_mask,
+        tf.concat([[-1], tf.shape(attn_mask)[-2:]], 0))
+      attn_weights += attn_mask
+
     attn_weights = tf.nn.softmax(attn_weights, -1)
     attn_probs = self.dropout(attn_weights)
     attn_output = tf.linalg.matmul(attn_probs, v)
@@ -194,8 +203,14 @@ class enclayer(tf.keras.layers.Layer):
     self.out_norm = lnorm()
 
   def call(self, inputs, training=None):
-    x = inputs
-    x_attn = self.atten(x)
+    if isinstance(inputs, tuple):
+      x, attn_mask = inputs
+
+    else:
+      x = inputs
+      attn_mask = None
+
+    x_attn = self.atten((x, attn_mask))
     x_attn = self.dropout(x_attn)
     x = x + x_attn
     x = self.norm(x)
@@ -216,7 +231,12 @@ class encoder(tf.keras.layers.Layer):
     self.layers = [enclayer() for _ in range(self.num_enc_layer)]
   
   def call(self, inputs, training=None):
-    x = inputs
+    if isinstance(inputs, tuple):
+      x, attn_mask = inputs
+
+    else:
+      x = inputs
+      attn_mask = None
 
     if len(self.layers) > 0:
       x = x + self.emb(x)
@@ -226,7 +246,7 @@ class encoder(tf.keras.layers.Layer):
     encs = []
     for i, layer in enumerate(self.layers):
       encs.append(x)
-      x = layer(x)
+      x = layer((x, attn_mask))
 
     encs.append(x)
     return encs
@@ -249,8 +269,12 @@ class wav2vec2(tf.keras.layers.Layer):
   
   def call(self, inputs, training=None):
     mask_time_indices = None
+    attn_mask = None
 
-    if isinstance(inputs, tuple):
+    if isinstance(inputs, tuple) and len(inputs) == 3:
+      x, mask_time_indices, attn_mask = inputs
+    
+    elif isinstance(inputs, tuple) and len(inputs) == 2:
       x, mask_time_indices = inputs
 
     else:
@@ -258,11 +282,12 @@ class wav2vec2(tf.keras.layers.Layer):
 
     x = self.fe(tf_expd(x, -1))
     x, x_feat = self.fp(x)
+
     if mask_time_indices is not None:
       _mask = tf_expd(mask_time_indices, -1)
       x = self.masked_spec_embed * _mask + x * (1. - _mask)
 
-    encs = self.enc(x)
+    encs = self.enc((x, attn_mask))
     return encs, x_feat
 
 class wav2vec2_seq(tf.keras.layers.Layer):
@@ -285,25 +310,41 @@ class wav2vec2_seq(tf.keras.layers.Layer):
   def call(self, inputs, training=None):
     mask_time_indices = None
     sampled_negative_indices = None
+    skip_encs = False
+    attn_mask = None
 
-    if isinstance(inputs, tuple) and len(inputs) == 3:
-      x, mask_time_indices, sampled_negative_indices = inputs
-    
+    if isinstance(inputs, tuple) and len(inputs) == 4:
+      if isinstance(inputs[0], tuple):
+        (encs, x_feat), mask_time_indices, sampled_negative_indices, attn_mask = inputs
+        skip_encs = True
+
+      else:
+        x, mask_time_indices, sampled_negative_indices, attn_mask = inputs
+
+    elif isinstance(inputs, tuple) and len(inputs) == 3:
+      if isinstance(inputs[0], tuple):
+        (encs, x_feat), mask_time_indices, sampled_negative_indices = inputs
+        skip_encs = True
+
+      else:
+        x, mask_time_indices, sampled_negative_indices = inputs
+
     elif isinstance(inputs, tuple) and len(inputs) == 2:
-      x, mask_time_indices = inputs
+      x, attn_mask = inputs
 
     else:
       x = inputs
 
-    encs, x_feat = self.wav2vec2((x, mask_time_indices))
+    if not skip_encs:
+      encs, x_feat = self.wav2vec2((x, mask_time_indices, attn_mask), training=training)
+      if sampled_negative_indices is None:
+        return encs, x_feat
+
     x = encs[-1]
 
     x = self.project_hid(x)
     qx_feat, perp = self.quantizer((x_feat, mask_time_indices), training=training)
     qx_feat = self.project_q(qx_feat)
-
-    if sampled_negative_indices is None:
-      return encs, x, qx_feat
 
     batch_size, seq_len, hdim = tf.shape(qx_feat)[0], tf.shape(qx_feat)[1], tf.shape(qx_feat)[2]
 
@@ -337,7 +378,7 @@ class wav2vec2_seq(tf.keras.layers.Layer):
 
     loss = cont_loss + 0.1 * div_loss 
       
-    return x, qx_feat, loss
+    return loss
 
 class wav2vec2_phone(tf.keras.layers.Layer):
   def __init__(self, 
@@ -360,14 +401,20 @@ class wav2vec2_phone(tf.keras.layers.Layer):
            ssl_loss=False, stop_grad=False, ctc=True):
     if isinstance(inputs, tuple) and len(inputs) == 4:
       x, ref, x_len, ref_len = inputs
+
+      max_x_len = mask.get_feat_extract_output_length(tf.shape(x)[1])
       x_len = mask.get_feat_extract_output_length(x_len)
+      attn_mask = tf.sequence_mask(tf.squeeze(x_len, -1), max_x_len)
+      attn_mask = tf.cast(attn_mask, dtype=tf.float32)
+      attn_mask = 1. - attn_mask
+      attn_mask *= -1e9
 
     else:
       x = inputs
       ref = None
+      attn_mask = None
 
-    x_feat = x
-    encs, _, _ = self.wav2vec2(x, training=training)
+    encs, x_feat = self.wav2vec2((x, attn_mask), training=training)
     #x = encs[-1]
     x = sum(encs)
     if stop_grad:
@@ -391,8 +438,8 @@ class wav2vec2_phone(tf.keras.layers.Layer):
         sampled_negative_indices = sample_negative_indices(
           batch_size, tf.shape(x)[1], mask_time_indices)
 
-        _, _, seq_loss = self.wav2vec2(
-         (x_feat, mask_time_indices, sampled_negative_indices), training=training)
+        seq_loss = self.wav2vec2(
+         ((encs, x_feat), mask_time_indices, sampled_negative_indices, attn_mask), training=training)
 
       if ctc:
         ctc_loss = _ctc_loss(

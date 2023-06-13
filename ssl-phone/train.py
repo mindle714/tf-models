@@ -184,9 +184,9 @@ def run_step(step, spec, txt, spec_len, txt_len,
              training=True, accum=False, stop_grad=False):
   with tf.GradientTape() as tape, log_writer.as_default():
     loss, sloss = m((spec, txt, spec_len, txt_len), 
-      training=training, 
+      training = training,
       ssl_loss = (not (args.ssl_weight == 0)),
-      stop_grad=stop_grad,
+      stop_grad = stop_grad,
       ctc = (not args.timit))
 
     loss = tf.math.reduce_mean(loss)
