@@ -2,13 +2,13 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--ckpt", type=str, required=True) 
 parser.add_argument("--eval-list", type=str, required=False,
-  default="/home/speech/wsj0/8k_tt_min.list") 
+  default="/home/hejung/wsj0/8k_tt_min.list") 
 parser.add_argument("--save-result", action="store_true") 
 args = parser.parse_args()
 
 import os
 import sys
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+#os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 expdir = os.path.abspath(os.path.dirname(args.ckpt))
 sys.path.insert(0, expdir)

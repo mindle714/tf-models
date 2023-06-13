@@ -228,12 +228,13 @@ def stft_loss(x, ref, frame_length, frame_step, fft_length):
   return sc_loss + mag_loss
 
 class tera_phone(tf.keras.layers.Layer):
-  def __init__(self, num_class=74, *args, **kwargs):
+  def __init__(self, num_class=74, use_last=False, *args, **kwargs):
     super(tera_phone, self).__init__(*args, **kwargs)
 
     self.n_fft = 400
     self.hop_len = 160
     self.num_class = num_class
+    self.use_last = use_last
 
   def build(self, input_shape):
     conv_opt = dict(padding='same', use_bias=False)
@@ -245,37 +246,36 @@ class tera_phone(tf.keras.layers.Layer):
   
   def call(self, inputs, training=None, 
            ssl_loss=False, stop_grad=False, ctc=True):
-    if isinstance(inputs, tuple) and len(inputs) == 4:
+    if isinstance(inputs, tuple) and len(inputs) == 6:
+      x, x_feat, ref, x_len, x_feat_len, ref_len = inputs
+    
+    elif isinstance(inputs, tuple) and len(inputs) == 4:
       x, ref, x_len, ref_len = inputs
+      x_feat = x; x_feat_len = x_len
+    
+    elif isinstance(inputs, tuple) and len(inputs) == 2:
+      x, x_len = inputs
+      x_feat = x; x_feat_len = x_len
+      ref = None; ref_len = None
 
     else:
       x = inputs
-      ref = None
+      x_len = None
+      x_feat = x; x_feat_len = x_len
+      ref = None; ref_len = None
 
-    x_feat = x
-    '''
-    split = 4
-
-    _x_len = tf.shape(x)[1]
-    x = tf.pad(x, [[0,0], [0, split - _x_len % split], [0,0]])
-    _xs = tf.split(x, split, axis=1)
-    x = tf.concat(_xs, 0)
-    '''
-
-    if ref is not None:
-      xs, _ = self.tera((x, x_len))
+    if x_len is not None:
+      xs, _ = self.tera((x, x_len), training=training)
     else:
-      xs, _ = self.tera(x)
+      xs, _ = self.tera(x, training=training)
 
-    x = sum(xs)
+    if self.use_last:
+      x = xs[-1]
+    else:
+      x = sum(xs)
+    
     if stop_grad:
       x = tf.stop_gradient(x)
-
-    '''
-    _xs = tf.split(x, split, axis=0)
-    x = tf.concat(_xs, 1)
-    x = tf.slice(x, [0, 0, 0], [-1, _x_len, -1])
-    '''
 
     x = self.proj(x)
     # TODO in s3prl, no activation between two linear layers
@@ -284,7 +284,7 @@ class tera_phone(tf.keras.layers.Layer):
     if ref is not None:
       seq_loss = 0.
       if ssl_loss:
-        x_mask, mask_label = mask_tera(x_feat, x_len)
+        x_mask, mask_label = mask_tera(x_feat, x_feat_len)
         mask_label = tf.cast(mask_label, tf.float32)
         _, seq_out = self.tera(x_mask)
         seq_loss = tf.math.abs(mask_label * (x_feat - seq_out))
@@ -311,8 +311,9 @@ class tera_phone(tf.keras.layers.Layer):
         ce_mask = tf.cast(ce_mask, x.dtype)
 
         ce_loss = ce_loss * ce_mask
-        ce_loss = tf.math.reduce_sum(ce_loss, -1)
-        ce_loss /= (tf.cast(_ref_len, x.dtype) + 1e-9)
+        # instead of sample-wise masking, do batch-wise
+        ce_loss = tf.math.reduce_sum(ce_loss)
+        ce_loss /= (tf.math.reduce_sum(ce_mask) + 1e-9)
 
         return ce_loss, seq_loss
 
