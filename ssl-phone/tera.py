@@ -246,19 +246,23 @@ class tera_phone(tf.keras.layers.Layer):
   
   def call(self, inputs, training=None, 
            ssl_loss=False, stop_grad=False, ctc=True):
-    if isinstance(inputs, tuple) and len(inputs) == 4:
+    if isinstance(inputs, tuple) and len(inputs) == 6:
+      x, x_feat, ref, x_len, x_feat_len, ref_len = inputs
+    
+    elif isinstance(inputs, tuple) and len(inputs) == 4:
       x, ref, x_len, ref_len = inputs
+      x_feat = x; x_feat_len = x_len
     
     elif isinstance(inputs, tuple) and len(inputs) == 2:
       x, x_len = inputs
+      x_feat = x; x_feat_len = x_len
       ref = None; ref_len = None
 
     else:
       x = inputs
       x_len = None
+      x_feat = x; x_feat_len = x_len
       ref = None; ref_len = None
-
-    x_feat = x
 
     if x_len is not None:
       xs, _ = self.tera((x, x_len), training=training)
@@ -280,7 +284,7 @@ class tera_phone(tf.keras.layers.Layer):
     if ref is not None:
       seq_loss = 0.
       if ssl_loss:
-        x_mask, mask_label = mask_tera(x_feat, x_len)
+        x_mask, mask_label = mask_tera(x_feat, x_feat_len)
         mask_label = tf.cast(mask_label, tf.float32)
         _, seq_out = self.tera(x_mask)
         seq_loss = tf.math.abs(mask_label * (x_feat - seq_out))
