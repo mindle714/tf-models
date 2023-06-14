@@ -2,7 +2,9 @@ __pycache__/
 exps/
 libriphone/
 libriphone_v4/
+libriphone_v5_w2v
 *.ckpt.*
 *.wav
 results/
 timit/
+timit_w2v
