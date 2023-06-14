@@ -426,7 +426,7 @@ class wav2vec2_phone(tf.keras.layers.Layer):
     if self.use_last:
       x = encs[-1]
     else:
-      x = sum(encs)
+      x = sum(encs[:4])
 
     if stop_grad:
       x = tf.stop_gradient(x)
