@@ -382,13 +382,19 @@ class wav2vec2_seq(tf.keras.layers.Layer):
 
 class wav2vec2_phone(tf.keras.layers.Layer):
   def __init__(self, 
-               num_enc_layer=12, num_class=74, use_last=False,
+               num_enc_layer=12, num_class=74, 
+               use_last=False, num_neg=100,
+               mask_prob=0.05, mask_len=10,
                *args, **kwargs):
     super(wav2vec2_phone, self).__init__(*args, **kwargs)
     
     self.num_enc_layer = num_enc_layer
     self.num_class = num_class
     self.use_last = use_last
+    self.num_neg = num_neg
+    self.mask_prob = mask_prob
+    self.mask_len = mask_len
+    self.min_masks = 2
 
   def build(self, input_shape):
     conv_opt = dict(padding='same', use_bias=False)
@@ -449,10 +455,11 @@ class wav2vec2_phone(tf.keras.layers.Layer):
 
         mask_time_indices = mask.compute_mask_indices(
           batch_size, max_x_feat_len,
-          tf.cast(feat_attn_mask, tf.int32))
+          tf.cast(feat_attn_mask, tf.int32),
+          self.mask_prob, self.mask_len, self.min_masks)
 
         sampled_negative_indices = sample_negative_indices(
-          batch_size, max_x_feat_len, mask_time_indices)
+          batch_size, max_x_feat_len, mask_time_indices, self.num_neg)
         
         feat_attn_mask = 1. - tf.cast(feat_attn_mask, dtype=tf.float32)
         feat_attn_mask *= -1e9

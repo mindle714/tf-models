@@ -36,6 +36,9 @@ parser.add_argument("--begin-ssl", type=int, required=False, default=0)
 parser.add_argument("--end-ssl", type=int, required=False, default=None)
 parser.add_argument("--period-ssl", type=int, required=False, default=None)
 parser.add_argument("--period-ssl-decay", type=float, required=False, default=1.0)
+parser.add_argument("--num-neg", type=int, required=False, default=100)
+parser.add_argument("--mask-prob", type=float, required=False, default=0.05)
+parser.add_argument("--mask-len", type=int, required=False, default=10)
 parser.add_argument("--output", type=str, required=True) 
 parser.add_argument("--warm-start", type=str, required=False, default=None)
 parser.add_argument("--stop-grad", action='store_true')
@@ -178,7 +181,8 @@ lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
 import wav2vec2
-m = wav2vec2.wav2vec2_phone(num_class=50, use_last=False)
+m = wav2vec2.wav2vec2_phone(num_class=50, use_last=False,
+  num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
 
 _in = np.zeros((args.batch_size, samp_len), dtype=np.float32)
 _ref = np.zeros((args.batch_size, txt_len), dtype=np.float32)
