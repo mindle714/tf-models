@@ -33,12 +33,14 @@ parser.add_argument("--begin-ssl", type=int, required=False, default=0)
 parser.add_argument("--end-ssl", type=int, required=False, default=None)
 parser.add_argument("--period-ssl", type=int, required=False, default=None)
 parser.add_argument("--period-ssl-decay", type=float, required=False, default=1.0)
+parser.add_argument("--num-neg", type=int, required=False, default=100)
+parser.add_argument("--mask-prob", type=float, required=False, default=0.05)
+parser.add_argument("--mask-len", type=int, required=False, default=10)
 parser.add_argument("--output", type=str, required=True) 
 parser.add_argument("--warm-start", type=str, required=False, default=None)
 parser.add_argument("--stop-grad", action='store_true')
 parser.add_argument("--from-init", action='store_true')
 parser.add_argument("--profile", action='store_true')
-parser.add_argument("--timit", action='store_true')
 args = parser.parse_args()
 
 if args.end_ssl is None:
@@ -87,22 +89,26 @@ elif args.ssl_decay_schedule == "inv-linear":
 else:
   assert False, "unknown type {}".format(args.ssl_decay_schedule)
 
+import sys
 import json
 tfrec_args = os.path.join(args.tfrec, "ARGS")
 with open(tfrec_args, "r") as f:
   _json = json.loads(f.readlines()[-1])
   samp_len = _json["samp_len"]
   txt_len = _json["text_len"]
+  spec_len = int((samp_len - 400 + 400) / 160) + 1 
 
 if args.val_tfrec is not None:
   val_tfrec_args = os.path.join(args.val_tfrec, "ARGS")
   with open(val_tfrec_args, "r") as f:
-    val_samp_len = json.loads(f.readlines()[-1])["samp_len"]
+    _json = json.loads(f.readlines()[-1])
+    val_samp_len = _json["samp_len"]
+    val_txt_len = _json["text_len"]
+    val_spec_len = int((val_samp_len - 400 + 400) / 160) + 1 
   if val_samp_len != samp_len:
     sys.exit('validation data has sample length {}'.format(val_samp_len))
 
 import types
-import sys
 from stat import S_IREAD, S_IRGRP, S_IROTH, S_IWUSR
 
 args_file = os.path.join(args.output, "ARGS")
@@ -136,31 +142,24 @@ import parse_data
 import glob
 
 tfrec_list = glob.glob(os.path.join(args.tfrec, "train-*.tfrecord"))
-# TODO calculate on gen_data.py
-spec_len = 1701
-if args.timit:
-  spec_len = 801
 dataset = parse_data.gen_train(tfrec_list, spec_len, txt_len,
   batch_size=args.batch_size, seed=seed)
 
 val_dataset = None
 if args.val_tfrec is not None:
   val_tfrec_list = glob.glob(os.path.join(args.val_tfrec, "train-*.tfrecord"))
-  val_dataset = parse_data.gen_val(val_tfrec_list, samp_len,
+  val_dataset = parse_data.gen_val(val_tfrec_list, val_spec_len,
     batch_size=args.batch_size, seed=seed)
 
 lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
 import tera
-if args.timit:
-  m = tera.tera_phone(num_class=50)
-else:
-  m = tera.tera_phone()
+m = tera.tera_phone()
 
 if args.accum_step > 1:
   _in = np.zeros((args.batch_size, spec_len, 80), dtype=np.float32)
-  _ = m(_in, ctc = (not args.timit))
+  _ = m(_in, ctc = True)
   accum_grads = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights]
 
 specs = [val.__spec__ for name, val in sys.modules.items() \
@@ -187,7 +186,7 @@ def run_step(step, spec, txt, spec_len, txt_len,
       training = training,
       ssl_loss = (not (args.ssl_weight == 0)),
       stop_grad = stop_grad,
-      ctc = (not args.timit))
+      ctc = True)
 
     loss = tf.math.reduce_mean(loss)
     tf.summary.scalar("loss", loss, step=step)
