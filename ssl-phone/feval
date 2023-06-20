@@ -90,5 +90,6 @@ fi
 
 if $max; then
   echo $suf_mem | grep -o ">[^()]*(_[0-9k]*_)(([0-9.]*))<" | \
-    tr -d '><' | sed 's/(_/(/g' | sed 's/_)/)/g' | sed 's/((/ /g' | sed 's/))//g'
+    tr -d '><' | sed 's/(_/(/g' | sed 's/_)/)/g' | sed 's/((/ /g' | sed 's/))/ /g' | \
+    awk '{printf "%40s\t%.3f\n", $1, $2}'
 fi
