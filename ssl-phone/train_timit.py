@@ -16,7 +16,7 @@ parser.add_argument("--tfrec", type=str, required=True)
 parser.add_argument("--val-tfrec", type=str, required=False, default=None)
 parser.add_argument("--ssl-tfrec", type=str, required=False, default=None)
 parser.add_argument("--eval-list", type=str, required=False, 
-  default="/data/hejung/timit/test_w2v.wav.phone")
+  default="/data/hejung/timit/test.wav.phone")
 parser.add_argument("--batch-size", type=int, required=False, default=8) 
 parser.add_argument("--accum-step", type=int, required=False, default=2)
 parser.add_argument("--eval-step", type=int, required=False, default=100) 
@@ -36,15 +36,17 @@ parser.add_argument("--begin-ssl", type=int, required=False, default=0)
 parser.add_argument("--end-ssl", type=int, required=False, default=None)
 parser.add_argument("--period-ssl", type=int, required=False, default=None)
 parser.add_argument("--period-ssl-decay", type=float, required=False, default=1.0)
-parser.add_argument("--num-neg", type=int, required=False, default=100)
-parser.add_argument("--mask-prob", type=float, required=False, default=0.05)
-parser.add_argument("--mask-len", type=int, required=False, default=10)
+parser.add_argument("--ssl-from-delayed", action='store_true')
+parser.add_argument("--sort-ssl", action='store_true')
 parser.add_argument("--output", type=str, required=True) 
 parser.add_argument("--warm-start", type=str, required=False, default=None)
 parser.add_argument("--stop-grad", action='store_true')
 parser.add_argument("--from-init", action='store_true')
 parser.add_argument("--profile", action='store_true')
 args = parser.parse_args()
+
+if args.ssl_tfrec is not None and args.ssl_from_delayed:
+  print("WARN: --ssl-tfrec ignores --ssl-from-delayed")
 
 import metric
 import soundfile
@@ -109,6 +111,7 @@ with open(tfrec_args, "r") as f:
   _json = json.loads(f.readlines()[-1])
   samp_len = _json["samp_len"]
   txt_len = _json["text_len"]
+  spec_len = int((samp_len - 400 + 400) / 160) + 1 
 
 if args.val_tfrec is not None:
   val_tfrec_args = os.path.join(args.val_tfrec, "ARGS")
@@ -116,6 +119,7 @@ if args.val_tfrec is not None:
     _json = json.loads(f.readlines()[-1])
     val_samp_len = _json["samp_len"]
     val_txt_len = _json["text_len"]
+    val_spec_len = int((val_samp_len - 400 + 400) / 160) + 1 
   if val_samp_len != samp_len:
     sys.exit('validation data has sample length {}'.format(val_samp_len))
 
@@ -124,9 +128,7 @@ if args.ssl_tfrec is not None:
   with open(ssl_tfrec_args, "r") as f:
     _json = json.loads(f.readlines()[-1])
     ssl_samp_len = _json["samp_len"]
-    ssl_txt_len = _json["text_len"]
-#  if ssl_samp_len != samp_len:
-#    sys.exit('ssl data has sample length {}'.format(ssl_samp_len))
+    ssl_spec_len = int((ssl_samp_len - 400 + 400) / 160) + 1 
 
 import types
 from stat import S_IREAD, S_IRGRP, S_IROTH, S_IWUSR
@@ -146,6 +148,13 @@ with open(args_file, "w") as f:
   f.write(json.dumps(vars(args)))
 os.chmod(args_file, S_IREAD|S_IRGRP|S_IROTH)
 
+ipaddr_file = os.path.join(args.output, "IPADDR")
+with open(ipaddr_file, "w") as f:
+  import socket
+  s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+  s.connect(("8.8.8.8", 80))
+  f.write(s.getsockname()[0])
+
 gpus = tf.config.list_physical_devices('GPU')
 if gpus:
   try:
@@ -162,36 +171,30 @@ import parse_data
 import glob
 
 tfrec_list = glob.glob(os.path.join(args.tfrec, "train-*.tfrecord"))
-dataset = parse_data.gen_train(tfrec_list, samp_len, txt_len,
+dataset = parse_data.gen_train(tfrec_list, spec_len, txt_len,
   batch_size=args.batch_size, seed=seed)
 
 val_dataset = None
 if args.val_tfrec is not None:
   val_tfrec_list = glob.glob(os.path.join(args.val_tfrec, "train-*.tfrecord"))
-  val_dataset = parse_data.gen_val(val_tfrec_list, val_samp_len,
+  val_dataset = parse_data.gen_val(val_tfrec_list, val_spec_len,
     batch_size=args.batch_size, seed=seed)
 
 ssl_dataset = None
 if args.ssl_tfrec is not None:
   ssl_tfrec_list = glob.glob(os.path.join(args.ssl_tfrec, "train-*.tfrecord"))
-  ssl_dataset = parse_data.gen_train(ssl_tfrec_list, ssl_samp_len, ssl_txt_len,
+  ssl_dataset = parse_data.gen_train(ssl_tfrec_list, ssl_spec_len, None,
     batch_size=args.batch_size, seed=seed)
 
 lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
-import wav2vec2
-m = wav2vec2.wav2vec2_phone(num_class=50, use_last=False,
-  num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
-
-_in = np.zeros((args.batch_size, samp_len), dtype=np.float32)
-_ref = np.zeros((args.batch_size, txt_len), dtype=np.float32)
-_in_len = np.ones((args.batch_size, 1), dtype=np.int32) * samp_len
-_ref_len = np.ones((args.batch_size, 1), dtype=np.int32) * txt_len
-  
-_ = m((_in, _ref, _in_len, _ref_len), ssl_loss = True, ctc = False)
+import tera
+m = tera.tera_phone(num_class=50, use_last=True)
 
 if args.accum_step > 1:
+  _in = np.zeros((args.batch_size, spec_len, 80), dtype=np.float32)
+  _ = m(_in, ctc = False)
   accum_grads = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights]
 
 specs = [val.__spec__ for name, val in sys.modules.items() \
@@ -211,11 +214,11 @@ if args.profile:
   tf.profiler.experimental.start(logdir)
 
 @tf.function
-def run_step(step, pcm, ssl_pcm, txt,
-             samp_len, ssl_samp_len, txt_len,
+def run_step(step, spec, ssl_spec, txt,
+             spec_len, ssl_spec_len, txt_len,
              training=True, accum=False, stop_grad=False):
   with tf.GradientTape() as tape, log_writer.as_default():
-    loss, sloss = m((pcm, ssl_pcm, txt, samp_len, ssl_samp_len, txt_len), 
+    loss, sloss, bloss = m((spec, ssl_spec, txt, spec_len, ssl_spec_len, txt_len), 
       training=training, 
       ssl_loss = (not (args.ssl_weight == 0)),
       stop_grad=stop_grad,
@@ -267,10 +270,11 @@ def run_step(step, pcm, ssl_pcm, txt,
           if grad is None: continue
           accum_grads[idx].assign(tf.zeros_like(grad))
 
-  return loss, sloss, ssl_weight
+  return loss, sloss, bloss, ssl_weight
 
 def run_eval_step(pcm, pcm_len):
-  _hyp = m(pcm, training=False)
+  spec_dict = parse_data.conv_spec({'pcm': pcm, 'pcm_len': pcm_len})
+  _hyp = m(spec_dict['spec'], training=False)
   return _hyp
 
 import logging
@@ -305,6 +309,8 @@ if args.warm_start is not None:
       opt_weight = np.load(opt_weight, allow_pickle=True)
       opt_cfg = np.load(opt_cfg, allow_pickle=True).flatten()[0] 
 
+  _in = np.zeros((args.batch_size, spec_len, 80), dtype=np.float32)
+  _ = m(_in)
   ckpt.read(args.warm_start).assert_consumed()
 
   if not args.from_init:
@@ -319,7 +325,17 @@ if args.warm_start is not None:
 
 _traced_begin = 2; _traced_cnt = 10
 if ssl_dataset is None:
-  ssl_dataset = dataset
+  ssl_dataset = iter(lambda: None, 0)
+
+prev_bloss = []
+prev_spec = []
+prev_spec_len = []
+
+ssl_data_cand = []
+if args.sort_ssl:
+  ssl_batch_size = args.batch_size // 2
+else:
+  ssl_batch_size = args.batch_size
 
 for idx, (data, ssl_data) in enumerate(zip(dataset, ssl_dataset)):
   idx += init_epoch
@@ -328,13 +344,60 @@ for idx, (data, ssl_data) in enumerate(zip(dataset, ssl_dataset)):
   # TODO not using (idx+1) to call apply_grads in initial run_step()
   accum = not (idx % args.accum_step == 0)
 
+  if ssl_data is not None:
+    ssl_spec = ssl_data["spec"]
+    ssl_spec_len = ssl_data["spec_len"]
+
+  else:
+    if args.ssl_from_delayed:
+      # update ssl_data_cand
+      if (idx+1) % args.accum_step == 0:
+        if len(prev_bloss) >= args.accum_step:
+          if args.sort_ssl:
+            _prev_bloss = tf.concat(prev_bloss, 0)
+            inds = tf.math.top_k(-_prev_bloss, k=args.accum_step*ssl_batch_size).indices
+            inds = tf.random.shuffle(inds)
+
+            _prev_spec = tf.unstack(tf.gather(tf.concat(prev_spec, 0), inds))
+            _prev_spec_len = tf.unstack(tf.gather(tf.concat(prev_spec_len, 0), inds))
+
+            ssl_data_cand = [(i, j) for i, j in zip(_prev_spec, _prev_spec_len)]
+
+          else:
+            _prev_spec = tf.unstack(tf.concat(prev_spec, 0))
+            _prev_spec_len = tf.unstack(tf.concat(prev_spec_len, 0))
+
+            ssl_data_cand = [(i, j) for i, j in zip(_prev_spec, _prev_spec_len)]
+
+        prev_bloss = []; prev_spec = []; prev_spec_len = []
+
+      if len(ssl_data_cand) == 0:
+        ssl_spec = data["spec"]
+        ssl_spec_len = data["spec_len"]
+
+      else:
+        _ssl_data_cand = ssl_data_cand[:ssl_batch_size]
+        ssl_data_cand = ssl_data_cand[ssl_batch_size:]
+
+        _ssl_spec = []; _ssl_spec_len = []
+        for s, sl in _ssl_data_cand:
+          _ssl_spec.append(tf.expand_dims(s, 0))
+          _ssl_spec_len.append(tf.expand_dims(sl, 0))
+
+        ssl_spec = tf.concat(_ssl_spec, 0)
+        ssl_spec_len = tf.concat(_ssl_spec_len, 0)
+
+    else:
+      ssl_spec = data["spec"]
+      ssl_spec_len = data["spec_len"]
+
   if args.profile:
     if idx > (init_epoch + _traced_begin) and _traced_cnt > 0:
       with tf.profiler.experimental.Trace('train', step_num=idx, _r=1):
-        loss, sloss, sw = run_step(
+        loss, sloss, bloss, sw = run_step(
           tf.cast(idx, tf.int64),
-          data["pcm"], ssl_data["pcm"], data["txt"], 
-          data["pcm_len"], ssl_data["pcm_len"], data["txt_len"],
+          data["spec"], ssl_spec, data["txt"], 
+          data["spec_len"], ssl_spec_len, data["txt_len"],
           accum=accum, stop_grad=args.stop_grad)
       _traced_cnt -= 1
 
@@ -343,18 +406,22 @@ for idx, (data, ssl_data) in enumerate(zip(dataset, ssl_dataset)):
       _traced_cnt -= 1
 
     else:
-        loss, sloss, sw = run_step(
+        loss, sloss, bloss, sw = run_step(
           tf.cast(idx, tf.int64),
-          data["pcm"], ssl_data["pcm"], data["txt"], 
-          data["pcm_len"], ssl_data["pcm_len"], data["txt_len"],
+          data["spec"], ssl_spec, data["txt"], 
+          data["spec_len"], ssl_spec_len, data["txt_len"],
           accum=accum, stop_grad=args.stop_grad)
 
   else:
-    loss, sloss, sw = run_step(
+    loss, sloss, bloss, sw = run_step(
       tf.cast(idx, tf.int64),
-      data["pcm"], ssl_data["pcm"], data["txt"], 
-      data["pcm_len"], ssl_data["pcm_len"], data["txt_len"],
+      data["spec"], ssl_spec, data["txt"], 
+      data["spec_len"], ssl_spec_len, data["txt_len"],
       accum=accum, stop_grad=args.stop_grad)
+
+  prev_bloss.append(bloss)
+  prev_spec.append(data["spec"])
+  prev_spec_len.append(data["spec_len"])
 
   log_writer.flush()
   tf.summary.scalar("lr", lr, step=idx)
@@ -371,7 +438,7 @@ for idx, (data, ssl_data) in enumerate(zip(dataset, ssl_dataset)):
   elif idx > init_epoch and idx % args.val_step == 0:
     val_loss = 0; num_val = 0
     for val_data in val_dataset:
-      val_loss += run_eval_step(val_data["pcm"], val_data["ref"])
+      val_loss += run_eval_step(val_data["spec"], val_data["ref"])
       num_val += 1
     val_loss /= num_val
 
@@ -411,7 +478,7 @@ for idx, (data, ssl_data) in enumerate(zip(dataset, ssl_dataset)):
         f.flush()
     
       f.write("final: {}\n".format(np.mean(pers)))
-    
+
     logger.info("gstep[{}] per[{:.4f}]".format(idx, np.mean(pers)))
 
     modelname = "model-{}.ckpt".format(idx)

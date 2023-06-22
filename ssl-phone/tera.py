@@ -286,7 +286,7 @@ class tera_phone(tf.keras.layers.Layer):
       if ssl_loss:
         x_mask, mask_label = mask_tera(x_feat, x_feat_len)
         mask_label = tf.cast(mask_label, tf.float32)
-        _, seq_out = self.tera(x_mask)
+        _, seq_out = self.tera((x_mask, x_feat_len))
         seq_loss = tf.math.abs(mask_label * (x_feat - seq_out))
 
         seq_loss = tf.math.reduce_sum(seq_loss, [-1, -2])
@@ -303,18 +303,22 @@ class tera_phone(tf.keras.layers.Layer):
         return ctc_loss, seq_loss
 
       else:
-        ce_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
+        _ce_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
           tf.cast(ref, tf.int32), x)
 
         _ref_len = tf.squeeze(ref_len, -1)
         ce_mask = tf.sequence_mask(_ref_len, tf.shape(x)[1])
         ce_mask = tf.cast(ce_mask, x.dtype)
 
-        ce_loss = ce_loss * ce_mask
+        ce_loss = _ce_loss * ce_mask
         # instead of sample-wise masking, do batch-wise
         ce_loss = tf.math.reduce_sum(ce_loss)
         ce_loss /= (tf.math.reduce_sum(ce_mask) + 1e-9)
 
-        return ce_loss, seq_loss
+        bat_ce_loss = _ce_loss * ce_mask
+        bat_ce_loss = tf.math.reduce_sum(bat_ce_loss, -1)
+        bat_ce_loss /= (tf.cast(_ref_len, x.dtype) + 1e-9)
+
+        return ce_loss, seq_loss, bat_ce_loss
 
     return x

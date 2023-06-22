@@ -3,6 +3,9 @@ exps/
 libriphone/
 libriphone_v4/
 libriphone_v5_w2v
+libriphone100_360/
+libriphone360/
+libriphone360_w2v/
 *.ckpt.*
 *.wav
 results/
