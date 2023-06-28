@@ -38,6 +38,9 @@ parser.add_argument("--period-ssl", type=int, required=False, default=None)
 parser.add_argument("--period-ssl-decay", type=float, required=False, default=1.0)
 parser.add_argument("--ssl-from-delayed", action='store_true')
 parser.add_argument("--sort-ssl", action='store_true')
+parser.add_argument("--project-ssl", action='store_true')
+parser.add_argument("--ssl-ema-beta", type=float, required=False, default=0.9)
+parser.add_argument("--ssl-ema-update", type=int, required=False, default=1)
 parser.add_argument("--output", type=str, required=True) 
 parser.add_argument("--warm-start", type=str, required=False, default=None)
 parser.add_argument("--stop-grad", action='store_true')
@@ -191,11 +194,13 @@ opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
 import tera
 m = tera.tera_phone(num_class=50, use_last=True)
+m_ema = tera.tera_phone(num_class=50, use_last=True)
 
 if args.accum_step > 1:
   _in = np.zeros((args.batch_size, spec_len, 80), dtype=np.float32)
   _ = m(_in, ctc = False)
   accum_grads = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights]
+  _ = m_ema(_in, ctc = False)
 
 specs = [val.__spec__ for name, val in sys.modules.items() \
   if isinstance(val, types.ModuleType) and not ('_main_' in name)]
@@ -216,13 +221,22 @@ if args.profile:
 @tf.function
 def run_step(step, spec, ssl_spec, txt,
              spec_len, ssl_spec_len, txt_len,
-             training=True, accum=False, stop_grad=False):
-  with tf.GradientTape() as tape, log_writer.as_default():
-    loss, sloss, bloss = m((spec, ssl_spec, txt, spec_len, ssl_spec_len, txt_len), 
+             training=True, accum=False,
+             stop_grad=False, update_ema=False):
+  mask_label, seq_out = m_ema((ssl_spec, ssl_spec_len), ssl_only=True)
+
+  with tf.GradientTape(persistent=True) as tape, log_writer.as_default():
+    loss, _, bloss, _seq_out = m(
+      (spec, ssl_spec, txt, spec_len, ssl_spec_len, txt_len, mask_label),
       training=training, 
       ssl_loss = (not (args.ssl_weight == 0)),
       stop_grad=stop_grad,
       ctc = False)
+
+    sloss = tf.math.abs(mask_label * (seq_out - _seq_out))
+    sloss = tf.math.reduce_sum(sloss, [-1, -2])
+    denom = tf.math.reduce_sum(mask_label, [-1, -2])
+    sloss /= (denom + 1e-9)
 
     loss = tf.math.reduce_mean(loss)
     tf.summary.scalar("loss", loss, step=step)
@@ -234,7 +248,7 @@ def run_step(step, spec, ssl_spec, txt,
     ssl_step = step % args.period_ssl
     num_period = step // args.period_ssl
 
-    if ssl_step > args.begin_ssl and ssl_step < args.end_ssl:
+    if ssl_step >= args.begin_ssl and ssl_step < args.end_ssl:
       _ssl_weight = args.ssl_weight * (args.period_ssl_decay ** tf.cast(num_period, tf.float32))
 
       if args.ssl_decay:
@@ -244,12 +258,46 @@ def run_step(step, spec, ssl_spec, txt,
         ssl_weight = _ssl_weight
 
     tf.summary.scalar("ssl_weight", ssl_weight, step=step)
-    total_loss = loss + ssl_weight * sloss
+    sloss = ssl_weight * sloss
+    total_loss = loss + sloss
 
   if training:
     weights = m.trainable_weights
-    grads = tape.gradient(total_loss, weights)
-    grads, _ = tf.clip_by_global_norm(grads, 5.)
+
+    if not args.project_ssl:
+      grads = tape.gradient(total_loss, weights)
+      grads, _ = tf.clip_by_global_norm(grads, 5.)
+
+    else:
+      ds_weights = [e for e in weights if 'pred_head/' not in e.name]
+      assert len(weights) - len(ds_weights) == 6
+      ds_grads = tape.gradient(loss, ds_weights)
+      ds_idxs = {e.name:g for e,g in zip(ds_weights, ds_grads)}
+      
+      ssl_weights = [e for e in weights if 'tera_phone/dense' not in e.name]
+      assert len(weights) - len(ssl_weights) == 4
+      ssl_grads = tape.gradient(sloss, ssl_weights)
+      ssl_idxs = {e.name:g for e,g in zip(ssl_weights, ssl_grads)}
+
+      grads = []
+      for w in weights:
+        if w.name in ds_idxs and w.name in ssl_idxs:
+          ds_grad = ds_idxs[w.name]
+          ssl_grad = ssl_idxs[w.name]
+          if tf.math.reduce_sum(ds_grad * ssl_grad) < 0:
+            prj_ssl_grad = ssl_grad - tf.math.reduce_sum(ds_grad * ssl_grad) / tf.math.reduce_sum(ds_grad * ds_grad) * ds_grad
+          else:
+            prj_ssl_grad = ssl_grad
+          grads.append(ds_grad + prj_ssl_grad)
+
+        else:
+          if w.name in ds_idxs:
+            grads.append(ds_idxs[w.name])
+          
+          else:
+            grads.append(ssl_idxs[w.name])
+      
+      grads, _ = tf.clip_by_global_norm(grads, 5.)
             
     if args.accum_step == 1:
       opt.apply_gradients(zip(grads, weights))
@@ -265,6 +313,11 @@ def run_step(step, spec, ssl_spec, txt,
           accum_grads[idx].assign(accum_grads[idx]/args.accum_step)
 
         opt.apply_gradients(zip(accum_grads, weights))
+
+        if update_ema:
+          for w, w_ema in zip(m.trainable_weights, m_ema.trainable_weights):
+            delta = (1. - args.ssl_ema_beta) * (w - w_ema)
+            w_ema.assign_add(delta)
                 
         for idx, grad in enumerate(grads):
           if grad is None: continue
@@ -287,6 +340,7 @@ fh = logging.FileHandler(logfile)
 logger.addHandler(fh)
 
 ckpt = tf.train.Checkpoint(m)
+ema_ckpt = tf.train.Checkpoint(m_ema)
 prev_val_loss = None; stall_cnt = 0
 
 init_epoch = 0
@@ -312,6 +366,8 @@ if args.warm_start is not None:
   _in = np.zeros((args.batch_size, spec_len, 80), dtype=np.float32)
   _ = m(_in)
   ckpt.read(args.warm_start).assert_consumed()
+  _ = m_ema(_in)
+  ema_ckpt.read(args.warm_start).assert_consumed()
 
   if not args.from_init:
     if isinstance(opt_weight, np.ndarray):
@@ -343,6 +399,7 @@ for idx, (data, ssl_data) in enumerate(zip(dataset, ssl_dataset)):
             
   # TODO not using (idx+1) to call apply_grads in initial run_step()
   accum = not (idx % args.accum_step == 0)
+  update_ema = (idx % args.ssl_ema_update == 0)
 
   if ssl_data is not None:
     ssl_spec = ssl_data["spec"]
@@ -398,7 +455,7 @@ for idx, (data, ssl_data) in enumerate(zip(dataset, ssl_dataset)):
           tf.cast(idx, tf.int64),
           data["spec"], ssl_spec, data["txt"], 
           data["spec_len"], ssl_spec_len, data["txt_len"],
-          accum=accum, stop_grad=args.stop_grad)
+          accum=accum, update_ema=update_ema, stop_grad=args.stop_grad)
       _traced_cnt -= 1
 
     elif idx > (init_epoch + _traced_begin) and  _traced_cnt == 0:
@@ -410,14 +467,14 @@ for idx, (data, ssl_data) in enumerate(zip(dataset, ssl_dataset)):
           tf.cast(idx, tf.int64),
           data["spec"], ssl_spec, data["txt"], 
           data["spec_len"], ssl_spec_len, data["txt_len"],
-          accum=accum, stop_grad=args.stop_grad)
+          accum=accum, update_ema=update_ema, stop_grad=args.stop_grad)
 
   else:
     loss, sloss, bloss, sw = run_step(
       tf.cast(idx, tf.int64),
       data["spec"], ssl_spec, data["txt"], 
       data["spec_len"], ssl_spec_len, data["txt_len"],
-      accum=accum, stop_grad=args.stop_grad)
+      accum=accum, update_ema=update_ema, stop_grad=args.stop_grad)
 
   prev_bloss.append(bloss)
   prev_spec.append(data["spec"])

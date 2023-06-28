@@ -245,8 +245,23 @@ class tera_phone(tf.keras.layers.Layer):
     self.linear = tf.keras.layers.Dense(self.num_class, use_bias=True)
   
   def call(self, inputs, training=None, 
-           ssl_loss=False, stop_grad=False, ctc=True):
-    if isinstance(inputs, tuple) and len(inputs) == 6:
+           ssl_loss=False, stop_grad=False, ctc=True,
+           ssl_only=False):
+    if ssl_only:
+      assert isinstance(inputs, tuple) and len(inputs) == 2
+      x_feat, x_feat_len = inputs
+
+      x_mask, mask_label = mask_tera(x_feat, x_feat_len)
+      mask_label = tf.cast(mask_label, tf.float32)
+      _, seq_out = self.tera((x_mask, x_feat_len))
+
+      return mask_label, seq_out
+
+    mask_label = None
+    if isinstance(inputs, tuple) and len(inputs) == 7:
+      x, x_feat, ref, x_len, x_feat_len, ref_len, mask_label = inputs
+    
+    elif isinstance(inputs, tuple) and len(inputs) == 6:
       x, x_feat, ref, x_len, x_feat_len, ref_len = inputs
     
     elif isinstance(inputs, tuple) and len(inputs) == 4:
@@ -284,8 +299,12 @@ class tera_phone(tf.keras.layers.Layer):
     if ref is not None:
       seq_loss = 0.
       if ssl_loss:
-        x_mask, mask_label = mask_tera(x_feat, x_feat_len)
-        mask_label = tf.cast(mask_label, tf.float32)
+        if mask_label is None:
+          x_mask, mask_label = mask_tera(x_feat, x_feat_len)
+          mask_label = tf.cast(mask_label, tf.float32)
+        else:
+          x_mask = (1. - mask_label) * x_feat
+
         _, seq_out = self.tera((x_mask, x_feat_len))
         seq_loss = tf.math.abs(mask_label * (x_feat - seq_out))
 
@@ -300,7 +319,7 @@ class tera_phone(tf.keras.layers.Layer):
           tf.squeeze(tf.cast(x_len, tf.int32), -1), 
           blank_index=0)
 
-        return ctc_loss, seq_loss
+        return ctc_loss, seq_loss, seq_out
 
       else:
         _ce_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
@@ -319,6 +338,6 @@ class tera_phone(tf.keras.layers.Layer):
         bat_ce_loss = tf.math.reduce_sum(bat_ce_loss, -1)
         bat_ce_loss /= (tf.cast(_ref_len, x.dtype) + 1e-9)
 
-        return ce_loss, seq_loss, bat_ce_loss
+        return ce_loss, seq_loss, bat_ce_loss, seq_out
 
     return x
