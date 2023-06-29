@@ -15,17 +15,16 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--tfrec", type=str, required=True) 
 parser.add_argument("--val-tfrec", type=str, required=False, default=None)
 parser.add_argument("--ssl-tfrec", type=str, required=False, default=None)
-parser.add_argument("--eval-list", type=str, required=False, 
-  default="/data/hejung/librispeech/test-clean.flac.phone")
+parser.add_argument("--eval-list", type=str, required=False, default=None) 
 parser.add_argument("--batch-size", type=int, required=False, default=8) 
 parser.add_argument("--accum-step", type=int, required=False, default=2)
 parser.add_argument("--eval-step", type=int, required=False, default=100) 
-parser.add_argument("--save-step", type=int, required=False, default=10000) 
+parser.add_argument("--save-step", type=int, required=False, default=None) 
 parser.add_argument("--val-step", type=int, required=False, default=5000) 
-parser.add_argument("--train-step", type=int, required=False, default=45000) 
+parser.add_argument("--train-step", type=int, required=False, default=None) 
 parser.add_argument("--begin-lr", type=float, required=False, default=2e-4) 
 parser.add_argument("--lr-decay-rate", type=float, required=False, default=0.96)
-parser.add_argument("--lr-decay-step", type=float, required=False, default=4000)
+parser.add_argument("--lr-decay-step", type=float, required=False, default=None)
 parser.add_argument("--val-lr-update", type=float, required=False, default=3) 
 parser.add_argument("--ssl-weight", type=float, required=False, default=0)
 parser.add_argument("--ssl-decay", action='store_true')
@@ -36,17 +35,28 @@ parser.add_argument("--begin-ssl", type=int, required=False, default=0)
 parser.add_argument("--end-ssl", type=int, required=False, default=None)
 parser.add_argument("--period-ssl", type=int, required=False, default=None)
 parser.add_argument("--period-ssl-decay", type=float, required=False, default=1.0)
-parser.add_argument("--num-neg", type=int, required=False, default=100)
-parser.add_argument("--mask-prob", type=float, required=False, default=0.05)
-parser.add_argument("--mask-len", type=int, required=False, default=10)
+parser.add_argument("--ssl-from-ema", action='store_true')
 parser.add_argument("--ssl-ema-beta", type=float, required=False, default=0.9)
 parser.add_argument("--ssl-ema-update", type=int, required=False, default=1)
 parser.add_argument("--output", type=str, required=True) 
+parser.add_argument("--timit", action='store_true')
 parser.add_argument("--warm-start", type=str, required=False, default=None)
 parser.add_argument("--stop-grad", action='store_true')
 parser.add_argument("--from-init", action='store_true')
 parser.add_argument("--profile", action='store_true')
 args = parser.parse_args()
+
+if args.timit:
+  if args.save_step is None: args.save_step = 100
+  if args.train_step is None: args.train_step = 2000
+  if args.lr_decay_step is None: args.lr_decay_step = 300
+  if args.eval_list is None: args.eval_list = "/data/hejung/timit/test.wav.phone"
+
+else:
+  if args.save_step is None: args.save_step = 10000
+  if args.train_step is None: args.train_step = 45000
+  if args.lr_decay_step is None: args.lr_decay_step = 4000
+  if args.eval_list is None: args.eval_list = "/data/hejung/librispeech/test-clean.flac.phone"
 
 import metric
 import soundfile
@@ -171,33 +181,43 @@ import parse_data
 import glob
 
 tfrec_list = glob.glob(os.path.join(args.tfrec, "train-*.tfrecord"))
-dataset = parse_data.gen_train(tfrec_list, spec_len, txt_len,
+_len = spec_len if args.timit else samp_len
+dataset = parse_data.gen_train(tfrec_list, _len, txt_len,
   batch_size=args.batch_size, seed=seed)
 
 val_dataset = None
 if args.val_tfrec is not None:
   val_tfrec_list = glob.glob(os.path.join(args.val_tfrec, "train-*.tfrecord"))
-  val_dataset = parse_data.gen_val(val_tfrec_list, val_spec_len,
+  _val_len = val_spec_len if args.timit else val_samp_len
+  val_dataset = parse_data.gen_val(val_tfrec_list, _val_len,
     batch_size=args.batch_size, seed=seed)
 
 ssl_dataset = None
 if args.ssl_tfrec is not None:
   ssl_tfrec_list = glob.glob(os.path.join(args.ssl_tfrec, "train-*.tfrecord"))
-  ssl_dataset = parse_data.gen_train(ssl_tfrec_list, ssl_spec_len, None,
+  _ssl_len = ssl_spec_len if args.timit else ssl_samp_len
+  ssl_dataset = parse_data.gen_train(ssl_tfrec_list, _ssl_len, None,
     batch_size=args.batch_size, seed=seed)
 
 lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
 import tera
-m = tera.tera_phone()
-m_ema = tera.tera_phone()
+if args.timit:
+  m = tera.tera_phone(num_class=50, use_last=True)
+  m_ema = tera.tera_phone(num_class=50, use_last=True)
+  is_ctc = False
+else:
+  m = tera.tera_phone(use_last=True)
+  m_ema = tera.tera_phone(use_last=True)
+  is_ctc = True
 
 if args.accum_step > 1:
   _in = np.zeros((args.batch_size, spec_len, 80), dtype=np.float32)
-  _ = m(_in, ctc = True)
+  _ = m(_in, ctc = is_ctc)
+  _ = m_ema(_in, ctc = is_ctc)
+
   accum_grads = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights]
-  _ = m_ema(_in, ctc = True)
 
 specs = [val.__spec__ for name, val in sys.modules.items() \
   if isinstance(val, types.ModuleType) and not ('_main_' in name)]
@@ -220,43 +240,63 @@ def run_step(step, spec, ssl_spec, txt,
              spec_len, ssl_spec_len, txt_len,
              training=True, accum=False,
              stop_grad=False, update_ema=False):
-  mask_label, seq_out = m_ema((ssl_spec, ssl_spec_len), ssl_only=True)
+  ssl_weight = 0.
+  ssl_step = step % args.period_ssl
+  num_period = step // args.period_ssl
 
-  with tf.GradientTape(persistent=True) as tape, log_writer.as_default():
-    loss, _, _seq_out = m(
-      (spec, ssl_spec, txt, spec_len, ssl_spec_len, txt_len, mask_label),
-      training=training, 
-      ssl_loss = (not (args.ssl_weight == 0)),
-      stop_grad = stop_grad,
-      ctc = True)
+  if ssl_step >= args.begin_ssl and ssl_step < args.end_ssl:
+    _ssl_weight = args.ssl_weight * (args.period_ssl_decay ** tf.cast(num_period, tf.float32))
 
-    sloss = tf.math.abs(mask_label * (seq_out - _seq_out))
-    sloss = tf.math.reduce_sum(sloss, [-1, -2])
-    denom = tf.math.reduce_sum(mask_label, [-1, -2])
-    sloss /= (denom + 1e-9)
+    if args.ssl_decay:
+      ssl_weight = factor_decay(tf.cast(ssl_step, tf.float32),
+        args.end_ssl - args.begin_ssl, _ssl_weight)
+    else:
+      ssl_weight = _ssl_weight
 
-    loss = tf.math.reduce_mean(loss)
-    tf.summary.scalar("loss", loss, step=step)
-    sloss = tf.where(sloss > args.ssl_margin, sloss, tf.zeros_like(sloss))
-    sloss = tf.math.reduce_mean(sloss)
-    tf.summary.scalar("sloss", sloss, step=step)
+  tf.summary.scalar("ssl_weight", ssl_weight, step=step)
 
-    ssl_weight = 0.
-    ssl_step = step % args.period_ssl
-    num_period = step // args.period_ssl
+  if args.ssl_from_ema:
+    mask_label, seq_out = m_ema((ssl_spec, ssl_spec_len), ssl_only=True)
 
-    if ssl_step >= args.begin_ssl and ssl_step < args.end_ssl:
-      _ssl_weight = args.ssl_weight * (args.period_ssl_decay ** tf.cast(num_period, tf.float32))
+    with tf.GradientTape(persistent=True) as tape, log_writer.as_default():
+      loss, _, _seq_out = m(
+        (spec, ssl_spec, txt, spec_len, ssl_spec_len, txt_len, mask_label),
+        training = training, 
+        ssl_loss = (not (args.ssl_weight == 0)),
+        stop_grad = stop_grad,
+        ctc = is_ctc)
 
-      if args.ssl_decay:
-        ssl_weight = factor_decay(tf.cast(ssl_step, tf.float32),
-          args.end_ssl - args.begin_ssl, _ssl_weight)
-      else:
-        ssl_weight = _ssl_weight
+      sloss = tf.math.abs(mask_label * (seq_out - _seq_out))
+      sloss = tf.math.reduce_sum(sloss, [-1, -2])
+      denom = tf.math.reduce_sum(mask_label, [-1, -2])
+      sloss /= (denom + 1e-9)
 
-    tf.summary.scalar("ssl_weight", ssl_weight, step=step)
-    sloss = ssl_weight * sloss
-    total_loss = loss + sloss
+      loss = tf.math.reduce_mean(loss)
+      tf.summary.scalar("loss", loss, step=step)
+      sloss = tf.where(sloss > args.ssl_margin, sloss, tf.zeros_like(sloss))
+      sloss = tf.math.reduce_mean(sloss)
+      tf.summary.scalar("sloss", sloss, step=step)
+
+      sloss = ssl_weight * sloss
+      total_loss = loss + sloss
+
+  else:
+    with tf.GradientTape(persistent=True) as tape, log_writer.as_default():
+      loss, sloss, _ = m(
+        (spec, ssl_spec, txt, spec_len, ssl_spec_len, txt_len),
+        training = training, 
+        ssl_loss = (not (args.ssl_weight == 0)),
+        stop_grad = stop_grad,
+        ctc = is_ctc)
+
+      loss = tf.math.reduce_mean(loss)
+      tf.summary.scalar("loss", loss, step=step)
+      sloss = tf.where(sloss > args.ssl_margin, sloss, tf.zeros_like(sloss))
+      sloss = tf.math.reduce_mean(sloss)
+      tf.summary.scalar("sloss", sloss, step=step)
+
+      sloss = ssl_weight * sloss
+      total_loss = loss + sloss
 
   if training:
     weights = m.trainable_weights

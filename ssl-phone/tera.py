@@ -336,10 +336,6 @@ class tera_phone(tf.keras.layers.Layer):
         ce_loss = tf.math.reduce_sum(ce_loss)
         ce_loss /= (tf.math.reduce_sum(ce_mask) + 1e-9)
 
-        bat_ce_loss = _ce_loss * ce_mask
-        bat_ce_loss = tf.math.reduce_sum(bat_ce_loss, -1)
-        bat_ce_loss /= (tf.cast(_ref_len, x.dtype) + 1e-9)
-
-        return ce_loss, seq_loss, bat_ce_loss, seq_out
+        return ce_loss, seq_loss, seq_out
 
     return x

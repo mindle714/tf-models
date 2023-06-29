@@ -2,9 +2,7 @@ import tensorflow as tf
 
 def parse_func(spec_len, txt_len):
   desc = {
-    #'pcm': tf.io.FixedLenFeature([pcm_len], tf.float32),
     'spec': tf.io.FixedLenFeature([spec_len*80], tf.float32),
-    #'pcm_len': tf.io.FixedLenFeature([1], tf.int64),
     'spec_len': tf.io.FixedLenFeature([1], tf.int64),
   }
   if txt_len is not None:
