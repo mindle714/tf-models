@@ -61,6 +61,11 @@ else:
   if args.train_step is None: args.train_step = 45000
   if args.lr_decay_step is None: args.lr_decay_step = 4000
   if args.eval_list is None: args.eval_list = "/data/hejung/librispeech/test-clean.flac.phone"
+  
+  from text import WordTextEncoder
+  path = "/ssd/hejung/librispeech"
+  tokenizer = WordTextEncoder.load_from_file(
+    os.path.join(path, "vocab/phoneme.txt"))
 
 import metric
 import soundfile
@@ -342,7 +347,22 @@ def run_step(step, pcm, ssl_pcm, txt,
 
 def run_eval_step(pcm, pcm_len):
   _hyp = m(pcm, training=False)
-  return _hyp
+
+  maxids = np.argmax(np.squeeze(_hyp.numpy(), 0), -1)
+
+  if args.timit:
+    return [str(e) for e in maxids]
+
+  def greedy(hyp):
+    truns = []; prev = 0
+    for idx in hyp:
+      if idx != prev:
+        if prev != 0: truns.append(prev)
+      prev = idx
+    if prev != 0: truns.append(prev)
+    return tokenizer.decode(truns)
+  
+  return greedy(maxids)
 
 import logging
 logger = tf.get_logger()
@@ -486,12 +506,14 @@ for idx, (data, ssl_data) in enumerate(zip(dataset, ssl_dataset)):
         _pcm_len = _pcm.shape[0]
         _pcm = np.expand_dims(_pcm, 0).astype(np.float32)
 
-        hyp = run_eval_step(_pcm, tf.cast(_pcm_len, tf.int64))
-        hyp = [str(e) for e in np.argmax(np.squeeze(hyp.numpy(), 0), -1)]
-        
         _ref = [int(e) for e in pcm_ref.split()[1:]]
-        _per = metric.per([" ".join(hyp[:len(_ref)])], 
-          [" ".join([str(e) for e in _ref])])
+        hyp = run_eval_step(_pcm, tf.cast(_pcm_len, tf.int64))
+
+        if args.timit:
+          _per = metric.per([" ".join(hyp)], [" ".join([str(e) for e in _ref])])
+        else:
+          _per = metric.per([hyp], [tokenizer.decode(_ref)])
+        
         pers.append(_per)
       
         f.write("{} {}\n".format(_per, " ".join(hyp)))
