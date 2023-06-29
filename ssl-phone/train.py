@@ -181,22 +181,19 @@ import parse_data
 import glob
 
 tfrec_list = glob.glob(os.path.join(args.tfrec, "train-*.tfrecord"))
-_len = spec_len if args.timit else samp_len
-dataset = parse_data.gen_train(tfrec_list, _len, txt_len,
+dataset = parse_data.gen_train(tfrec_list, spec_len, txt_len,
   batch_size=args.batch_size, seed=seed)
 
 val_dataset = None
 if args.val_tfrec is not None:
   val_tfrec_list = glob.glob(os.path.join(args.val_tfrec, "train-*.tfrecord"))
-  _val_len = val_spec_len if args.timit else val_samp_len
-  val_dataset = parse_data.gen_val(val_tfrec_list, _val_len,
+  val_dataset = parse_data.gen_val(val_tfrec_list, val_spec_len,
     batch_size=args.batch_size, seed=seed)
 
 ssl_dataset = None
 if args.ssl_tfrec is not None:
   ssl_tfrec_list = glob.glob(os.path.join(args.ssl_tfrec, "train-*.tfrecord"))
-  _ssl_len = ssl_spec_len if args.timit else ssl_samp_len
-  ssl_dataset = parse_data.gen_train(ssl_tfrec_list, _ssl_len, None,
+  ssl_dataset = parse_data.gen_train(ssl_tfrec_list, ssl_spec_len, None,
     batch_size=args.batch_size, seed=seed)
 
 lr = tf.Variable(args.begin_lr, trainable=False)
