@@ -14,6 +14,9 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--tfrec", type=str, required=True) 
 parser.add_argument("--val-tfrec", type=str, required=False, default=None)
+parser.add_argument("--ssl-tfrec", type=str, required=False, default=None)
+parser.add_argument("--eval-list", type=str, required=False, 
+  default="/data/hejung/librispeech/test-clean.flac.phone")
 parser.add_argument("--batch-size", type=int, required=False, default=8) 
 parser.add_argument("--accum-step", type=int, required=False, default=2)
 parser.add_argument("--eval-step", type=int, required=False, default=100) 
@@ -36,12 +39,24 @@ parser.add_argument("--period-ssl-decay", type=float, required=False, default=1.
 parser.add_argument("--num-neg", type=int, required=False, default=100)
 parser.add_argument("--mask-prob", type=float, required=False, default=0.05)
 parser.add_argument("--mask-len", type=int, required=False, default=10)
+parser.add_argument("--ssl-ema-beta", type=float, required=False, default=0.9)
+parser.add_argument("--ssl-ema-update", type=int, required=False, default=1)
 parser.add_argument("--output", type=str, required=True) 
 parser.add_argument("--warm-start", type=str, required=False, default=None)
 parser.add_argument("--stop-grad", action='store_true')
 parser.add_argument("--from-init", action='store_true')
 parser.add_argument("--profile", action='store_true')
 args = parser.parse_args()
+
+import metric
+import soundfile
+assert os.path.isfile(args.eval_list)
+evals = [e.strip() for e in open(args.eval_list, "r").readlines()]
+eval_pcms = []
+for idx, pcm_ref in enumerate(evals):
+  _pcm = pcm_ref.split()[0]
+  _pcm, _ = soundfile.read(_pcm)
+  eval_pcms.append(_pcm)
 
 if args.end_ssl is None:
   args.end_ssl = args.train_step
@@ -108,6 +123,13 @@ if args.val_tfrec is not None:
   if val_samp_len != samp_len:
     sys.exit('validation data has sample length {}'.format(val_samp_len))
 
+if args.ssl_tfrec is not None:
+  ssl_tfrec_args = os.path.join(args.ssl_tfrec, "ARGS")
+  with open(ssl_tfrec_args, "r") as f:
+    _json = json.loads(f.readlines()[-1])
+    ssl_samp_len = _json["samp_len"]
+    ssl_spec_len = int((ssl_samp_len - 400 + 400) / 160) + 1 
+
 import types
 from stat import S_IREAD, S_IRGRP, S_IROTH, S_IWUSR
 
@@ -125,6 +147,13 @@ with open(args_file, "w") as f:
   f.write("\n")
   f.write(json.dumps(vars(args)))
 os.chmod(args_file, S_IREAD|S_IRGRP|S_IROTH)
+
+ipaddr_file = os.path.join(args.output, "IPADDR")
+with open(ipaddr_file, "w") as f:
+  import socket
+  s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+  s.connect(("8.8.8.8", 80))
+  f.write(s.getsockname()[0])
 
 gpus = tf.config.list_physical_devices('GPU')
 if gpus:
@@ -151,16 +180,24 @@ if args.val_tfrec is not None:
   val_dataset = parse_data.gen_val(val_tfrec_list, val_spec_len,
     batch_size=args.batch_size, seed=seed)
 
+ssl_dataset = None
+if args.ssl_tfrec is not None:
+  ssl_tfrec_list = glob.glob(os.path.join(args.ssl_tfrec, "train-*.tfrecord"))
+  ssl_dataset = parse_data.gen_train(ssl_tfrec_list, ssl_spec_len, None,
+    batch_size=args.batch_size, seed=seed)
+
 lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
 import tera
 m = tera.tera_phone()
+m_ema = tera.tera_phone()
 
 if args.accum_step > 1:
   _in = np.zeros((args.batch_size, spec_len, 80), dtype=np.float32)
   _ = m(_in, ctc = True)
   accum_grads = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights]
+  _ = m_ema(_in, ctc = True)
 
 specs = [val.__spec__ for name, val in sys.modules.items() \
   if isinstance(val, types.ModuleType) and not ('_main_' in name)]
@@ -179,14 +216,24 @@ if args.profile:
   tf.profiler.experimental.start(logdir)
 
 @tf.function
-def run_step(step, spec, txt, spec_len, txt_len,
-             training=True, accum=False, stop_grad=False):
-  with tf.GradientTape() as tape, log_writer.as_default():
-    loss, sloss = m((spec, txt, spec_len, txt_len), 
-      training = training,
+def run_step(step, spec, ssl_spec, txt,
+             spec_len, ssl_spec_len, txt_len,
+             training=True, accum=False,
+             stop_grad=False, update_ema=False):
+  mask_label, seq_out = m_ema((ssl_spec, ssl_spec_len), ssl_only=True)
+
+  with tf.GradientTape(persistent=True) as tape, log_writer.as_default():
+    loss, _, _seq_out = m(
+      (spec, ssl_spec, txt, spec_len, ssl_spec_len, txt_len, mask_label),
+      training=training, 
       ssl_loss = (not (args.ssl_weight == 0)),
       stop_grad = stop_grad,
       ctc = True)
+
+    sloss = tf.math.abs(mask_label * (seq_out - _seq_out))
+    sloss = tf.math.reduce_sum(sloss, [-1, -2])
+    denom = tf.math.reduce_sum(mask_label, [-1, -2])
+    sloss /= (denom + 1e-9)
 
     loss = tf.math.reduce_mean(loss)
     tf.summary.scalar("loss", loss, step=step)
@@ -198,7 +245,7 @@ def run_step(step, spec, txt, spec_len, txt_len,
     ssl_step = step % args.period_ssl
     num_period = step // args.period_ssl
 
-    if ssl_step > args.begin_ssl and ssl_step < args.end_ssl:
+    if ssl_step >= args.begin_ssl and ssl_step < args.end_ssl:
       _ssl_weight = args.ssl_weight * (args.period_ssl_decay ** tf.cast(num_period, tf.float32))
 
       if args.ssl_decay:
@@ -208,7 +255,8 @@ def run_step(step, spec, txt, spec_len, txt_len,
         ssl_weight = _ssl_weight
 
     tf.summary.scalar("ssl_weight", ssl_weight, step=step)
-    total_loss = loss + ssl_weight * sloss
+    sloss = ssl_weight * sloss
+    total_loss = loss + sloss
 
   if training:
     weights = m.trainable_weights
@@ -229,12 +277,22 @@ def run_step(step, spec, txt, spec_len, txt_len,
           accum_grads[idx].assign(accum_grads[idx]/args.accum_step)
 
         opt.apply_gradients(zip(accum_grads, weights))
+
+        if update_ema:
+          for w, w_ema in zip(m.trainable_weights, m_ema.trainable_weights):
+            delta = (1. - args.ssl_ema_beta) * (w - w_ema)
+            w_ema.assign_add(delta)
                 
         for idx, grad in enumerate(grads):
           if grad is None: continue
           accum_grads[idx].assign(tf.zeros_like(grad))
 
   return loss, sloss, ssl_weight
+
+def run_eval_step(pcm, pcm_len):
+  spec_dict = parse_data.conv_spec({'pcm': pcm, 'pcm_len': pcm_len})
+  _hyp = m(spec_dict['spec'], training=False)
+  return _hyp
 
 import logging
 logger = tf.get_logger()
@@ -246,6 +304,7 @@ fh = logging.FileHandler(logfile)
 logger.addHandler(fh)
 
 ckpt = tf.train.Checkpoint(m)
+ema_ckpt = tf.train.Checkpoint(m_ema)
 prev_val_loss = None; stall_cnt = 0
 
 init_epoch = 0
@@ -271,6 +330,8 @@ if args.warm_start is not None:
   _in = np.zeros((args.batch_size, spec_len, 80), dtype=np.float32)
   _ = m(_in)
   ckpt.read(args.warm_start).assert_consumed()
+  _ = m_ema(_in)
+  ema_ckpt.read(args.warm_start).assert_consumed()
 
   if not args.from_init:
     if isinstance(opt_weight, np.ndarray):
@@ -283,20 +344,33 @@ if args.warm_start is not None:
       opt.set_weights(opt_weight)
 
 _traced_begin = 2; _traced_cnt = 10
-for idx, data in enumerate(dataset):
+if ssl_dataset is None:
+  ssl_dataset = iter(lambda: None, 0)
+
+for idx, (data, ssl_data) in enumerate(zip(dataset, ssl_dataset)):
   idx += init_epoch
   if idx > args.train_step: break
             
   # TODO not using (idx+1) to call apply_grads in initial run_step()
   accum = not (idx % args.accum_step == 0)
+  update_ema = (idx % args.ssl_ema_update == 0)
+
+  if ssl_data is not None:
+    ssl_spec = ssl_data["spec"]
+    ssl_spec_len = ssl_data["spec_len"]
+
+  else:
+      ssl_spec = data["spec"]
+      ssl_spec_len = data["spec_len"]
 
   if args.profile:
     if idx > (init_epoch + _traced_begin) and _traced_cnt > 0:
       with tf.profiler.experimental.Trace('train', step_num=idx, _r=1):
         loss, sloss, sw = run_step(
           tf.cast(idx, tf.int64),
-          data["spec"], data["txt"], data["spec_len"], data["txt_len"],
-          accum=accum, stop_grad=args.stop_grad)
+          data["spec"], ssl_spec, data["txt"], 
+          data["spec_len"], ssl_spec_len, data["txt_len"],
+          accum=accum, update_ema=update_ema, stop_grad=args.stop_grad)
       _traced_cnt -= 1
 
     elif idx > (init_epoch + _traced_begin) and  _traced_cnt == 0:
@@ -306,14 +380,16 @@ for idx, data in enumerate(dataset):
     else:
         loss, sloss, sw = run_step(
           tf.cast(idx, tf.int64),
-          data["spec"], data["txt"], data["spec_len"], data["txt_len"],
-          accum=accum, stop_grad=args.stop_grad)
+          data["spec"], ssl_spec, data["txt"], 
+          data["spec_len"], ssl_spec_len, data["txt_len"],
+          accum=accum, update_ema=update_ema, stop_grad=args.stop_grad)
 
   else:
     loss, sloss, sw = run_step(
       tf.cast(idx, tf.int64),
-      data["spec"], data["txt"], data["spec_len"], data["txt_len"],
-      accum=accum, stop_grad=args.stop_grad)
+      data["spec"], ssl_spec, data["txt"], 
+      data["spec_len"], ssl_spec_len, data["txt_len"],
+      accum=accum, update_ema=update_ema, stop_grad=args.stop_grad)
 
   log_writer.flush()
   tf.summary.scalar("lr", lr, step=idx)
@@ -330,8 +406,7 @@ for idx, data in enumerate(dataset):
   elif idx > init_epoch and idx % args.val_step == 0:
     val_loss = 0; num_val = 0
     for val_data in val_dataset:
-      val_loss += run_step(tf.cast(idx, tf.int64),
-        val_data["spec"], val_data["ref"], training=False)
+      val_loss += run_eval_step(val_data["spec"], val_data["ref"])
       num_val += 1
     val_loss /= num_val
 
@@ -350,6 +425,30 @@ for idx, data in enumerate(dataset):
     prev_val_loss = min(prev_val_loss, val_loss)
 
   if idx > init_epoch and idx % args.save_step == 0:
+    pers = []
+    expname = [e for e in args.output.split("/") if len(e) > 0][-1]
+    resname = "{}-{}".format(expname, idx)
+
+    with open(os.path.join("results", "{}.eval".format(resname)), "w") as f:
+      for _pcm, pcm_ref in zip(eval_pcms, evals):
+        _pcm_len = _pcm.shape[0]
+        _pcm = np.expand_dims(_pcm, 0).astype(np.float32)
+
+        hyp = run_eval_step(_pcm, tf.cast(_pcm_len, tf.int64))
+        hyp = [str(e) for e in np.argmax(np.squeeze(hyp.numpy(), 0), -1)]
+        
+        _ref = [int(e) for e in pcm_ref.split()[1:]]
+        _per = metric.per([" ".join(hyp[:len(_ref)])], 
+          [" ".join([str(e) for e in _ref])])
+        pers.append(_per)
+      
+        f.write("{} {}\n".format(_per, " ".join(hyp)))
+        f.flush()
+    
+      f.write("final: {}\n".format(np.mean(pers)))
+
+    logger.info("gstep[{}] per[{:.4f}]".format(idx, np.mean(pers)))
+
     modelname = "model-{}.ckpt".format(idx)
     modelpath = os.path.join(args.output, modelname)
     ckpt.write(modelpath)
