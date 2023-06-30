@@ -333,8 +333,26 @@ def run_step(step, spec, ssl_spec, txt,
   return loss, sloss, ssl_weight
 
 def run_eval_step(pcm, pcm_len):
-  spec_dict = parse_data.conv_spec({'pcm': pcm, 'pcm_len': pcm_len})
-  _hyp = m(spec_dict['spec'], training=False)
+  if not args.timit:
+    # sample_len-wise inference
+    hyps = []
+    for idx in range(int(np.ceil(pcm_len / samp_len))):
+      _pcm = pcm[idx * samp_len : (idx+1) * samp_len]
+      _pcm_len = _pcm.shape[0]
+
+      if _pcm_len < chunk_len:
+        if _pcm_len < 200: continue # if > n_fft//2, error in reflect pad
+
+      spec_dict = parse_data.conv_spec({'pcm': _pcm, 'pcm_len': pcm_len})
+      _hyp = m(spec_dict['spec'], training=False)
+      hyps.append(_hyp)
+
+    _hyp = np.concatenate(hyps, 1)
+
+  else:
+    # bulk inference
+    spec_dict = parse_data.conv_spec({'pcm': pcm, 'pcm_len': pcm_len})
+    _hyp = m(spec_dict['spec'], training=False)
 
   maxids = np.argmax(np.squeeze(_hyp.numpy(), 0), -1)
 
