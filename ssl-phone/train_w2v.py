@@ -354,7 +354,7 @@ def run_eval_step(pcm, pcm_len):
       _pcm = pcm[idx * samp_len : (idx+1) * samp_len]
       _pcm_len = _pcm.shape[0]
 
-      if _pcm_len < chunk_len:
+      if _pcm_len < samp_len:
         if _pcm_len < 200: continue # if > n_fft//2, error in reflect pad
 
       _hyp = m(_pcm, training=False)
