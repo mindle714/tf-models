@@ -54,16 +54,16 @@ if args.timit:
   if args.train_step is None: args.train_step = 2000
   if args.lr_decay_step is None: args.lr_decay_step = 300
   # different phoneme size unit; require different TIMIT segmentation
-  if args.eval_list is None: args.eval_list = "/data/hejung/timit/test_w2v.wav.phone"
+  if args.eval_list is None: args.eval_list = "/hdd1/hejung/timit/test_w2v.wav.phone"
 
 else:
   if args.save_step is None: args.save_step = 10000
   if args.train_step is None: args.train_step = 45000
   if args.lr_decay_step is None: args.lr_decay_step = 4000
-  if args.eval_list is None: args.eval_list = "/data/hejung/librispeech/test-clean.flac.phone"
+  if args.eval_list is None: args.eval_list = "/hdd1/hejung/librispeech/test-clean.flac.phone"
   
   from text import WordTextEncoder
-  path = "/ssd/hejung/librispeech"
+  path = "/hdd1/hejung/librispeech"
   tokenizer = WordTextEncoder.load_from_file(
     os.path.join(path, "vocab/phoneme.txt"))
 
@@ -210,15 +210,15 @@ opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
 import wav2vec2
 if args.timit:
-  m = wav2vec2.wav2vec2_phone(num_class=50, use_last=False,
+  m = wav2vec2.wav2vec2_phone(num_class=50, use_last=False, use_layers=3,
     num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
-  m_ema = wav2vec2.wav2vec2_phone(num_class=50, use_last=False,
+  m_ema = wav2vec2.wav2vec2_phone(num_class=50, use_last=False, use_layers=3,
     num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
   is_ctc = False
 else:
-  m = wav2vec2.wav2vec2_phone(use_last=False,
+  m = wav2vec2.wav2vec2_phone(use_last=False, use_layers=12,
     num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
-  m_ema = wav2vec2.wav2vec2_phone(use_last=False,
+  m_ema = wav2vec2.wav2vec2_phone(use_last=False, use_layers=12,
     num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
   is_ctc = True
 

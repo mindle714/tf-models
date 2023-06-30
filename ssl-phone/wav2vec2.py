@@ -434,7 +434,7 @@ class wav2vec2_seq(tf.keras.layers.Layer):
 class wav2vec2_phone(tf.keras.layers.Layer):
   def __init__(self, 
                num_enc_layer=12, num_class=74, 
-               use_last=False, num_neg=100,
+               use_last=False, use_layers=12, num_neg=100,
                mask_prob=0.05, mask_len=10,
                *args, **kwargs):
     super(wav2vec2_phone, self).__init__(*args, **kwargs)
@@ -442,6 +442,7 @@ class wav2vec2_phone(tf.keras.layers.Layer):
     self.num_enc_layer = num_enc_layer
     self.num_class = num_class
     self.use_last = use_last
+    self.use_layers = use_layers
     self.num_neg = num_neg
     self.mask_prob = mask_prob
     self.mask_len = mask_len
@@ -515,11 +516,12 @@ class wav2vec2_phone(tf.keras.layers.Layer):
       attn_mask = None
 
     encs, _ = self.wav2vec2((x, attn_mask), training=training)
+    assert len(encs) == (self.num_enc_layer + 1)
 
     if self.use_last:
       x = encs[-1]
     else:
-      x = sum(encs[:4])
+      x = sum(encs[:(self.use_layers+1)])
 
     if stop_grad:
       x = tf.stop_gradient(x)
