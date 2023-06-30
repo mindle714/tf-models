@@ -525,7 +525,7 @@ for idx, (data, ssl_data) in enumerate(zip(dataset, ssl_dataset)):
         _pcm = np.expand_dims(_pcm, 0).astype(np.float32)
 
         _ref = [int(e) for e in pcm_ref.split()[1:]]
-        hyp = run_eval_step(_pcm, tf.cast(_pcm_len, tf.int64))
+        hyp = run_eval_step(_pcm, _pcm_len)
 
         if args.timit:
           _per = metric.per([" ".join(hyp)], [" ".join([str(e) for e in _ref])])
