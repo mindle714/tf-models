@@ -354,7 +354,7 @@ def run_eval_step(pcm, pcm_len):
     spec_dict = parse_data.conv_spec({'pcm': pcm, 'pcm_len': pcm_len})
     _hyp = m(spec_dict['spec'], training=False)
 
-  maxids = np.argmax(np.squeeze(_hyp.numpy(), 0), -1)
+  maxids = np.argmax(np.squeeze(_hyp, 0), -1)
 
   if args.timit:
     return [str(e) for e in maxids]

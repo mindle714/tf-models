@@ -366,7 +366,7 @@ def run_eval_step(pcm, pcm_len):
     # bulk inference
     _hyp = m(pcm, training=False)
 
-  maxids = np.argmax(np.squeeze(_hyp.numpy(), 0), -1)
+  maxids = np.argmax(np.squeeze(_hyp, 0), -1)
 
   if args.timit:
     return [str(e) for e in maxids]
