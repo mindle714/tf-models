@@ -275,12 +275,13 @@ def run_step(step, pcm, ssl_pcm, txt,
   tf.summary.scalar("ssl_weight", ssl_weight, step=step)
 
   if args.ssl_from_ema:
-    mask_label, qx_feat, neg_qx_feat, perp = m_ema((ssl_pcm, ssl_samp_len), ssl_only=True)
+    mask_label, neg_indices, ema_x_feat = m_ema(
+      (ssl_pcm, ssl_samp_len), training = training, ssl_only=True)
 
     with tf.GradientTape(persistent=True) as tape, log_writer.as_default():
       loss, sloss = m(
         (pcm, ssl_pcm, txt, samp_len, ssl_samp_len, txt_len,
-          mask_label, qx_feat, neg_qx_feat, perp),
+          mask_label, neg_indices, ema_x_feat),
         training = training, 
         ssl_loss = (not (args.ssl_weight == 0)),
         stop_grad = stop_grad,
