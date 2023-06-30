@@ -316,32 +316,33 @@ class wav2vec2_seq(tf.keras.layers.Layer):
     if ssl_only:
       assert isinstance(inputs, tuple) and len(inputs) == 4
       x, mask_time_indices, sampled_negative_indices, attn_mask = inputs
-      _, x_feat = self.wav2vec2((x, mask_time_indices, attn_mask), training=training)
+
+      encs, x_feat = self.wav2vec2((x, mask_time_indices, attn_mask), training=training)
+      x = encs[-1]
     
-      qx_feat, perp = self.quantizer((x_feat, mask_time_indices), training=False)
-      qx_feat = self.project_q(qx_feat)
+      x = self.project_hid(x)
+      return x
+    
+    if isinstance(inputs, tuple) and len(inputs) == 5:
+      x, qx_feat, mask_time_indices, sampled_negative_indices, attn_mask = inputs
+      
+      encs, x_feat = self.wav2vec2((x, mask_time_indices, attn_mask), training=training)
+      x = encs[-1]
+    
+      x = self.project_hid(x)
     
       batch_size, seq_len, hdim = tf.shape(qx_feat)[0], tf.shape(qx_feat)[1], tf.shape(qx_feat)[2]
 
       neg_qx_feat = tf.gather(
         tf.reshape(qx_feat, [-1, hdim]),
         tf.reshape(sampled_negative_indices, [-1]))
-    
+
       neg_qx_feat = tf.reshape(neg_qx_feat, [batch_size, seq_len, -1, hdim])
       neg_qx_feat = tf.transpose(neg_qx_feat, [2, 0, 1, 3])
 
-      return qx_feat, neg_qx_feat, perp
-    
-    if isinstance(inputs, tuple) and len(inputs) == 6:
-      x, qx_feat, neg_qx_feat, perp, mask_time_indices, attn_mask = inputs
-      
-      encs, x_feat = self.wav2vec2((x, mask_time_indices, attn_mask), training=training)
-      x = encs[-1]
-    
-      x = self.project_hid(x)
       qx_logits = -self.cossim(x, tf_expd(qx_feat, 0)) / self.temperature
       neg_qx_logits = -self.cossim(x, neg_qx_feat) / self.temperature
-    
+
       neg_is_pos = tf.math.reduce_all(qx_feat == neg_qx_feat, -1)
       if tf.math.reduce_any(neg_is_pos):
         neg_qx_logits = tf.where(neg_is_pos,
@@ -355,14 +356,8 @@ class wav2vec2_seq(tf.keras.layers.Layer):
       mask_loss = tf.reshape(mask_loss, [-1])
       cont_loss = self.cce(tf.zeros_like(mask_loss), logits)
       cont_loss = tf.math.reduce_sum(cont_loss * mask_loss)
-
-      num_codevectors = 640
-      div_loss = ((num_codevectors - perp) / num_codevectors)
-      div_loss *= tf.math.reduce_sum(mask_time_indices)
-
-      loss = cont_loss + 0.1 * div_loss 
       
-      return loss
+      return cont_loss
 
     elif isinstance(inputs, tuple) and len(inputs) == 4:
       if isinstance(inputs[0], tuple):
@@ -478,19 +473,21 @@ class wav2vec2_phone(tf.keras.layers.Layer):
       feat_attn_mask = 1. - tf.cast(feat_attn_mask, dtype=tf.float32)
       feat_attn_mask *= -1e9
         
-      qx_feat, neg_qx_feat, perp = self.wav2vec2(
+      _x = self.wav2vec2(
         (x_feat, mask_time_indices, sampled_negative_indices, feat_attn_mask),
-        ssl_only=True, training=False)
+        ssl_only=True, training=training)
 
-      return mask_time_indices, qx_feat, neg_qx_feat, perp
+      return mask_time_indices, sampled_negative_indices, _x
    
     mask_time_indices = None
+    sampled_negative_indices = None
     qx_feat = None
     neg_qx_feat = None
     perp = None
+    ema_x_feat = None
 
-    if isinstance(inputs, tuple) and len(inputs) == 10:
-      x, x_feat, ref, x_len, x_feat_len, ref_len, mask_time_indices, qx_feat, neg_qx_feat, perp = inputs
+    if isinstance(inputs, tuple) and len(inputs) == 9:
+      x, x_feat, ref, x_len, x_feat_len, ref_len, mask_time_indices, sampled_negative_indices, ema_x_feat = inputs
       attn_mask = None
 
     elif isinstance(inputs, tuple) and (len(inputs) == 6 or len(inputs) == 4):
@@ -560,7 +557,7 @@ class wav2vec2_phone(tf.keras.layers.Layer):
           feat_attn_mask *= -1e9
 
           seq_loss = self.wav2vec2(
-            (x_feat, qx_feat, neg_qx_feat, perp, mask_time_indices, feat_attn_mask), training=training)
+            (x_feat, ema_x_feat, mask_time_indices, sampled_negative_indices, feat_attn_mask), training=training)
 
       if ctc:
         ctc_loss = _ctc_loss(
