@@ -211,8 +211,8 @@ if args.timit:
   m_ema = tera.tera_phone(num_class=50, use_last=True)
   is_ctc = False
 else:
-  m = tera.tera_phone(use_last=True)
-  m_ema = tera.tera_phone(use_last=True)
+  m = tera.tera_phone(use_last=False)
+  m_ema = tera.tera_phone(use_last=False)
   is_ctc = True
 
 if args.accum_step > 1:
