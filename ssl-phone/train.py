@@ -38,6 +38,8 @@ parser.add_argument("--period-ssl-decay", type=float, required=False, default=1.
 parser.add_argument("--ssl-from-ema", action='store_true')
 parser.add_argument("--ssl-ema-beta", type=float, required=False, default=0.9)
 parser.add_argument("--ssl-ema-update", type=int, required=False, default=1)
+parser.add_argument("--ewc", action='store_true')
+parser.add_argument("--ewc-lambda", type=float, required=False, default=0.01)
 parser.add_argument("--output", type=str, required=True) 
 parser.add_argument("--timit", action='store_true')
 parser.add_argument("--warm-start", type=str, required=False, default=None)
@@ -46,21 +48,25 @@ parser.add_argument("--from-init", action='store_true')
 parser.add_argument("--profile", action='store_true')
 args = parser.parse_args()
 
+if args.ewc and args.ssl_from_ema:
+  import sys
+  sys.exit('--ewc and --ssl-from-ema cannot co-exist')
+
 if args.timit:
   if args.save_step is None: args.save_step = 100
   if args.train_step is None: args.train_step = 2000
   if args.lr_decay_step is None: args.lr_decay_step = 300
   # different phoneme size unit; require different TIMIT segmentation
-  if args.eval_list is None: args.eval_list = "/ssd/hejung/timit/test.wav.phone"
+  if args.eval_list is None: args.eval_list = "/data/hejung/timit/test.wav.phone"
 
 else:
   if args.save_step is None: args.save_step = 10000
   if args.train_step is None: args.train_step = 45000
   if args.lr_decay_step is None: args.lr_decay_step = 4000
-  if args.eval_list is None: args.eval_list = "/ssd/hejung/librispeech/test-clean.flac.phone"
+  if args.eval_list is None: args.eval_list = "/data/hejung/librispeech/test-clean.flac.phone"
   
   from text import WordTextEncoder
-  path = "/ssd/hejung/librispeech"
+  path = "/data/hejung/librispeech"
   tokenizer = WordTextEncoder.load_from_file(
     os.path.join(path, "vocab/phoneme.txt"))
 
@@ -205,15 +211,22 @@ if args.ssl_tfrec is not None:
 lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
+if args.ewc:
+  import ewc
+
 import tera
 if args.timit:
   m = tera.tera_phone(num_class=50, use_last=True)
   m_ema = tera.tera_phone(num_class=50, use_last=True)
   is_ctc = False
+  if args.ewc:
+    m_ewc = tera.tera_phone(num_class=50, use_last=True)
 else:
   m = tera.tera_phone(use_last=False)
   m_ema = tera.tera_phone(use_last=False)
   is_ctc = True
+  if args.ewc:
+    m_ewc = tera.tera_phone(use_last=False)
 
 if args.accum_step > 1:
   _in = np.zeros((args.batch_size, spec_len, 80), dtype=np.float32)
@@ -301,6 +314,12 @@ def run_step(step, spec, ssl_spec, txt,
       sloss = ssl_weight * sloss
       total_loss = loss + sloss
 
+      if args.ewc:
+        ewc_loss = ewc.ewc_loss(args.ewc_lambda, m, 
+          m_ewc.trainable_weights, (ssl_spec, ssl_spec_len))
+        sloss = ewc_loss(m)
+        total_loss += sloss
+
   if training:
     weights = m.trainable_weights
     grads = tape.gradient(total_loss, weights)
@@ -381,6 +400,8 @@ logger.addHandler(fh)
 
 ckpt = tf.train.Checkpoint(m)
 ema_ckpt = tf.train.Checkpoint(m_ema)
+if args.ewc:
+  ewc_ckpt = tf.train.Checkpoint(m_ewc)
 prev_val_loss = None; stall_cnt = 0
 
 init_epoch = 0
@@ -408,6 +429,9 @@ if args.warm_start is not None:
   ckpt.read(args.warm_start).assert_consumed()
   _ = m_ema(_in)
   ema_ckpt.read(args.warm_start).assert_consumed()
+  if args.ewc:
+    _ = m_ewc(_in)
+    ewc_ckpt.read(args.warm_start).assert_consumed()
 
   if not args.from_init:
     if isinstance(opt_weight, np.ndarray):

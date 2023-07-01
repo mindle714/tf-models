@@ -9,49 +9,49 @@ import numpy as np
 import tensorflow as tf
 
 
-def fisher_matrix(model, dataset, samples):
+def fisher_matrix(model, data):
     """
     Compute the Fisher matrix, representing the importance of each weight in the
     model. This is approximated using the variance of the gradient of each
     weight, for some number of samples from the dataset.
 
-    :param model: Model whose Fisher matrix is to be computed.
-    :param dataset: Dataset which the model has been trained on, but which will
-                    not be seen in the future. Formatted as (inputs, labels).
-    :param samples: Number of samples to take from the dataset. More samples
-                    gives a better approximation of the true variance.
     :return: The main diagonal of the Fisher matrix, shaped to match the weights
              returned by `model.trainable_weights`.
     """
-    inputs, labels = dataset
     weights = model.trainable_weights
+    weights = [e for e in weights if 'tera_phone/dense' not in e.name]
+    assert len(model.trainable_weights) - len(weights) == 4
+
     variance = [tf.zeros_like(tensor) for tensor in weights]
 
-    for _ in range(samples):
-        # Select a random element from the dataset.
-        index = np.random.randint(len(inputs))
-        data = inputs[index]
+    _spec, _spec_len = data
+    batch_size = _spec.shape[0]
 
-        # When extracting from the array we lost a dimension so put it back.
-        data = tf.expand_dims(data, axis=0)
+    for idx in range(batch_size):
+        spec = _spec[idx]; spec_len = _spec_len[idx]
+        spec = tf.expand_dims(spec, 0)
+        spec_len = tf.expand_dims(spec_len, 0)
 
-        # Collect gradients.
         with tf.GradientTape() as tape:
-            output = model(data)
-            log_likelihood = tf.math.log(output)
+            mask_label, seq_out = model((spec, spec_len), ssl_only = True)
 
-        gradients = tape.gradient(log_likelihood, weights)
+            loss = tf.math.abs(mask_label * (seq_out - spec))
+            loss = tf.math.reduce_sum(loss, [-1, -2])
+            denom = tf.math.reduce_sum(mask_label, [-1, -2])
+            loss /= (denom + 1e-9)
+        
+        gradients = tape.gradient(loss, weights)
 
         # If the model has converged, we can assume that the current weights
         # are the mean, and each gradient we see is a deviation. The variance is
         # the average of the square of this deviation.
         variance = [var + (grad ** 2) for var, grad in zip(variance, gradients)]
 
-    fisher_diagonal = [tensor / samples for tensor in variance]
+    fisher_diagonal = [tensor / batch_size for tensor in variance]
     return fisher_diagonal
 
 
-def ewc_loss(lam, model, dataset, samples):
+def ewc_loss(lam, model, optimal_weights, samples):
     """
     Generate a loss function which will penalise divergence from the current
     state. It is assumed that the model achieves good accuracy on `dataset`,
@@ -59,22 +59,17 @@ def ewc_loss(lam, model, dataset, samples):
 
     The penalty is scaled according to how important each weight is for the
     given dataset, and `lam` (lambda) applies equally to all weights.
-
-    :param lam: Weight of this cost function compared to the other losses.
-    :param model: Model optimised for the given dataset.
-    :param dataset: NumPy arrays (inputs, labels).
-    :param samples: Number of samples of dataset to take when estimating
-                    importance of weights. More samples improves estimates.
-    :return: A loss function.
     """
-    optimal_weights = deepcopy(model.trainable_weights)
-    fisher_diagonal = fisher_matrix(model, dataset, samples)
+    optimal_weights = [e for e in optimal_weights if 'tera_phone/dense' not in e.name]
+    fisher_diagonal = fisher_matrix(model, samples)
 
     def loss_fn(new_model):
         # We're computing:
         # sum [(lambda / 2) * F * (current weights - optimal weights)^2]
         loss = 0
         current = new_model.trainable_weights
+        current = [e for e in current if 'tera_phone/dense' not in e.name]
+
         for f, c, o in zip(fisher_diagonal, current, optimal_weights):
             loss += tf.reduce_sum(f * ((c - o) ** 2))
 
@@ -128,22 +123,3 @@ def apply_mask(gradients, mask):
         gradients = [grad * tf.cast(mask, tf.float32)
                      for grad, mask in zip(gradients, mask)]
     return gradients
-
-
-def clip_gradients(gradients, threshold):
-    """
-    IncDet's gradient clipping method. EWC by default uses a quadratic loss,
-    which can grow very large and lead to unstable training. This method clips
-    quadratic terms to linear ones after the given threshold.
-    https://ieeexplore.ieee.org/document/9127478
-
-    :param gradients: Gradients of weights.
-    :param threshold: Boundary between quadratic and linear gradients.
-    :return: Gradients with same shape, but some values clipped.
-    """
-    # We scale each gradient g by: b / (max(b, |g|))
-    result = []
-    for tensor in gradients:
-        scale = threshold / (tf.math.maximum(threshold, tf.math.abs(tensor)))
-        result.append(scale * tensor)
-    return result
