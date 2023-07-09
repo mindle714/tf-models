@@ -248,8 +248,9 @@ _ = m((_in, _ref, _in_len, _ref_len),
   training = True, ssl_loss = do_ssl_loss, ctc = True)
 _ = m_ema((_in, _ref, _in_len, _ref_len),
   training = True, ssl_loss = do_ssl_loss, ctc = True)
-_ = m_ewc((_in, _ref, _in_len, _ref_len),
-  training = True, ssl_loss = do_ssl_loss, ctc = True)
+if args.ewc:
+  _ = m_ewc((_in, _ref, _in_len, _ref_len),
+    training = True, ssl_loss = do_ssl_loss, ctc = True)
 
 accum_grads = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights]
 
