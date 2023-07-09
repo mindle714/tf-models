@@ -453,7 +453,32 @@ class wav2vec2_phone(tf.keras.layers.Layer):
     
   def call(self, inputs, training=None,
            ssl_loss=False, stop_grad=False, ctc=True,
-           ssl_only=False):
+           ssl_only=False, ssl_only_ewc=False):
+    if ssl_only_ewc:
+      assert isinstance(inputs, tuple) and len(inputs) == 2
+      x_feat, x_feat_len = inputs
+      batch_size = x_feat.shape[0]
+      
+      max_x_feat_len = mask.get_feat_extract_output_length(tf.shape(x_feat)[1])
+      x_feat_len = mask.get_feat_extract_output_length(x_feat_len)
+      feat_attn_mask = tf.sequence_mask(tf.squeeze(x_feat_len, -1), max_x_feat_len)
+
+      mask_time_indices = mask.compute_mask_indices(
+        batch_size, max_x_feat_len,
+        tf.cast(feat_attn_mask, tf.int32),
+        self.mask_prob, self.mask_len, self.min_masks)
+
+      sampled_negative_indices = sample_negative_indices(
+        batch_size, max_x_feat_len, mask_time_indices, self.num_neg)
+        
+      feat_attn_mask = 1. - tf.cast(feat_attn_mask, dtype=tf.float32)
+      feat_attn_mask *= -1e9
+
+      seq_loss = self.wav2vec2(
+        (x_feat, mask_time_indices, sampled_negative_indices, feat_attn_mask), training=training)
+
+      return seq_loss
+
     if ssl_only:
       assert isinstance(inputs, tuple) and len(inputs) == 2
       x_feat, x_feat_len = inputs

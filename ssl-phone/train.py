@@ -460,8 +460,8 @@ for idx, (data, ssl_data) in enumerate(zip(dataset, ssl_dataset)):
     ssl_spec_len = ssl_data["spec_len"]
 
   else:
-      ssl_spec = data["spec"]
-      ssl_spec_len = data["spec_len"]
+    ssl_spec = data["spec"]
+    ssl_spec_len = data["spec_len"]
 
   if args.profile:
     if idx > (init_epoch + _traced_begin) and _traced_cnt > 0:
