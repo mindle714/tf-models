@@ -442,11 +442,13 @@ if args.warm_start is not None:
     # ignore projections used for pretraining
     ckpt.read(args.warm_start).expect_partial()
     ema_ckpt.read(args.warm_start).expect_partial()
-    ewc_ckpt.read(args.warm_start).expect_partial()
+    if args.ewc:
+      ewc_ckpt.read(args.warm_start).expect_partial()
   else:
     ckpt.read(args.warm_start).assert_consumed()
     ema_ckpt.read(args.warm_start).assert_consumed()
-    ewc_ckpt.read(args.warm_start).assert_consumed()
+    if args.ewc:
+      ewc_ckpt.read(args.warm_start).assert_consumed()
 
   if not args.from_init:
     if isinstance(opt_weight, np.ndarray):
