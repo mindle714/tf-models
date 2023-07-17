@@ -10,5 +10,6 @@ libriphone360_w2v/
 *.ckpt.*
 *.wav
 results/
+results_other/
 timit/
 timit_w2v
