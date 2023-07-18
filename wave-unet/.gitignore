@@ -1,6 +1,7 @@
 __pycache__/
-wsj0*/
 exps/
 *.wav
 *.png
 *.eval
+ljs_*
+wsj0_*
