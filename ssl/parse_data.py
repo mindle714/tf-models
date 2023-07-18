@@ -28,20 +28,14 @@ def add_mask(pcm_len):
     return ex
   return _add_mask
 
-def gen_train(tfrec_list, pcm_len, batch_size=16, seed=1234, epoch=None):
+def gen_train(tfrec_list, pcm_len, batch_size=16, seed=1234):
   dataset = tf.data.TFRecordDataset(tfrec_list)
   dataset = dataset.shuffle(batch_size*100, seed=seed, reshuffle_each_iteration=True)
-  if isinstance(epoch, int):
-    dataset = dataset.repeat(count=epoch)
-  else:
-    dataset = dataset.repeat()
+  dataset = dataset.repeat()
 
   dataset = dataset.map(parse_func(pcm_len))
   dataset = dataset.map(add_mask(pcm_len))
-  if isinstance(epoch, int):
-    dataset = dataset.batch(batch_size, drop_remainder=True)
-  else:
-    dataset = dataset.batch(batch_size)
+  dataset = dataset.batch(batch_size)
   dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
   return dataset
 
