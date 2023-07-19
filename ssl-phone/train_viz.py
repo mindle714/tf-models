@@ -38,8 +38,6 @@ parser.add_argument("--period-ssl-decay", type=float, required=False, default=1.
 parser.add_argument("--ssl-from-ema", action='store_true')
 parser.add_argument("--ssl-ema-beta", type=float, required=False, default=0.9)
 parser.add_argument("--ssl-ema-update", type=int, required=False, default=1)
-parser.add_argument("--ewc", action='store_true')
-parser.add_argument("--ewc-lambda", type=float, required=False, default=0.01)
 parser.add_argument("--output", type=str, required=True) 
 parser.add_argument("--timit", action='store_true')
 parser.add_argument("--warm-start", type=str, required=False, default=None)
@@ -47,10 +45,6 @@ parser.add_argument("--stop-grad", action='store_true')
 parser.add_argument("--from-init", action='store_true')
 parser.add_argument("--profile", action='store_true')
 args = parser.parse_args()
-
-if args.ewc and args.ssl_from_ema:
-  import sys
-  sys.exit('--ewc and --ssl-from-ema cannot co-exist')
 
 if args.timit:
   if args.save_step is None: args.save_step = 100
@@ -60,15 +54,7 @@ if args.timit:
   if args.eval_list is None: args.eval_list = "/data/hejung/timit/test.wav.phone"
 
 else:
-  if args.save_step is None: args.save_step = 10000
-  if args.train_step is None: args.train_step = 45000
-  if args.lr_decay_step is None: args.lr_decay_step = 4000
-  if args.eval_list is None: args.eval_list = "/data/hejung/librispeech/test-clean.flac.phone"
-  
-  from text import WordTextEncoder
-  path = "/data/hejung/librispeech"
-  tokenizer = WordTextEncoder.load_from_file(
-    os.path.join(path, "vocab/phoneme.txt"))
+  sys.exit('visualization requires --timit')
 
 import metric
 import soundfile
@@ -211,22 +197,17 @@ if args.ssl_tfrec is not None:
 lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
-if args.ewc:
-  import ewc
-
 import tera
 if args.timit:
   m = tera.tera_phone(num_class=50, use_last=True)
   m_ema = tera.tera_phone(num_class=50, use_last=True)
   is_ctc = False
-  if args.ewc:
-    m_ewc = tera.tera_phone(num_class=50, use_last=True)
+  m_frozen = tera.tera_phone(num_class=50, use_last=True)
 else:
   m = tera.tera_phone(use_last=False)
   m_ema = tera.tera_phone(use_last=False)
   is_ctc = True
-  if args.ewc:
-    m_ewc = tera.tera_phone(use_last=False)
+  m_frozen = tera.tera_phone(use_last=False)
 
 if args.accum_step > 1:
   _in = np.zeros((args.batch_size, spec_len, 80), dtype=np.float32)
@@ -278,7 +259,7 @@ def run_step(step, spec, ssl_spec, txt,
       loss, _, _seq_out = m(
         (spec, ssl_spec, txt, spec_len, ssl_spec_len, txt_len, mask_label),
         training = training, 
-        ssl_loss = (not (args.ssl_weight == 0)),
+        ssl_loss = True,
         stop_grad = stop_grad,
         ctc = is_ctc)
 
@@ -293,15 +274,14 @@ def run_step(step, spec, ssl_spec, txt,
       sloss = tf.math.reduce_mean(sloss)
       tf.summary.scalar("sloss", sloss, step=step)
 
-      sloss = ssl_weight * sloss
-      total_loss = loss + sloss
+      total_loss = loss + ssl_weight * sloss
 
   else:
     with tf.GradientTape(persistent=True) as tape, log_writer.as_default():
       loss, sloss, _ = m(
         (spec, ssl_spec, txt, spec_len, ssl_spec_len, txt_len),
         training = training, 
-        ssl_loss = (not (args.ssl_weight == 0)),
+        ssl_loss = True,
         stop_grad = stop_grad,
         ctc = is_ctc)
 
@@ -311,14 +291,7 @@ def run_step(step, spec, ssl_spec, txt,
       sloss = tf.math.reduce_mean(sloss)
       tf.summary.scalar("sloss", sloss, step=step)
 
-      sloss = ssl_weight * sloss
-      total_loss = loss + sloss
-
-      if args.ewc:
-        ewc_loss = ewc.ewc_loss(args.ewc_lambda, m, 
-          m_ewc.trainable_weights, (ssl_spec, ssl_spec_len))
-        sloss = ewc_loss(m)
-        total_loss += sloss
+      total_loss = loss + ssl_weight * sloss
 
   if training:
     weights = m.trainable_weights
@@ -400,8 +373,7 @@ logger.addHandler(fh)
 
 ckpt = tf.train.Checkpoint(m)
 ema_ckpt = tf.train.Checkpoint(m_ema)
-if args.ewc:
-  ewc_ckpt = tf.train.Checkpoint(m_ewc)
+frozen_ckpt = tf.train.Checkpoint(m_frozen)
 prev_val_loss = None; stall_cnt = 0
 
 init_epoch = 0
@@ -429,9 +401,8 @@ if args.warm_start is not None:
   ckpt.read(args.warm_start).assert_consumed()
   _ = m_ema(_in)
   ema_ckpt.read(args.warm_start).assert_consumed()
-  if args.ewc:
-    _ = m_ewc(_in)
-    ewc_ckpt.read(args.warm_start).assert_consumed()
+  _ = m_frozen(_in)
+  frozen_ckpt.read(args.warm_start).assert_consumed()
 
   if not args.from_init:
     if isinstance(opt_weight, np.ndarray):
@@ -446,6 +417,7 @@ if args.warm_start is not None:
 _traced_begin = 2; _traced_cnt = 10
 if ssl_dataset is None:
   ssl_dataset = iter(lambda: None, 0)
+sloss_ema = None
 
 for idx, (data, ssl_data) in enumerate(zip(dataset, ssl_dataset)):
   idx += init_epoch
@@ -494,8 +466,13 @@ for idx, (data, ssl_data) in enumerate(zip(dataset, ssl_dataset)):
   log_writer.flush()
   tf.summary.scalar("lr", lr, step=idx)
 
+  if sloss_ema is None:
+    sloss_ema = sloss
+  else:
+    sloss_ema = 0.5 * sloss_ema + 0.5 * sloss
+
   if idx > init_epoch and idx % args.eval_step == 0:
-    logger.info("gstep[{}] loss[{:.2f}] sloss[{:.2f}] lr[{:.2e}] sr[{:.2e}]".format(
+    logger.info("gstep[{}] loss[{:.2f}] sloss[{:.2e}] lr[{:.2e}] sr[{:.2e}]".format(
       idx, loss, sloss, lr.numpy(), sw))
 
   if val_dataset is None:
@@ -549,7 +526,13 @@ for idx, (data, ssl_data) in enumerate(zip(dataset, ssl_dataset)):
     
       f.write("final: {}\n".format(np.mean(pers)))
 
-    logger.info("gstep[{}] per[{:.4f}]".format(idx, np.mean(pers)))
+    diff = 0
+    for var, var_f in zip(m.trainable_weights, m_frozen.trainable_weights):
+      diff += tf.math.reduce_sum((var - var_f)**2)
+    diff = tf.math.sqrt(diff)
+
+    logger.info("gstep[{}] sloss[{:.4e}] wdiff[{:.4e}] per[{:.4f}]".format(
+        idx, sloss_ema, diff, np.mean(pers)))
 
     modelname = "model-{}.ckpt".format(idx)
     modelpath = os.path.join(args.output, modelname)

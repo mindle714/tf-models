@@ -1,2 +1,4 @@
-librispeech_960/
+librispeech_960
+exps/
+vbank_demand_28
 __pycache__/

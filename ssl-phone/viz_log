@@ -1,0 +1,17 @@
+#!/usr/bin/bash
+
+python3 viz_log.py \
+  --log exps_viz/timit_tera_pre/train.log \
+  exps_viz/timit_tera_pre_ssl_ema_u800_b0.6_w0.01/train.log \
+  exps_viz/timit_tera_pre_ssl_ema_u800_b0.6_w0.1/train.log \
+  exps_viz/timit_tera_pre_ssl_ema_u800_b0.6/train.log \
+  exps_viz/timit_tera_pre_ssl_ema_u800_b0.6_w10/train.log \
+  exps_viz/timit_tera_pre_ssl_ema_u800_b0.6_w20/train.log \
+  --label base \
+  "WS-SSL, $\\lambda$=0.01" \
+  "WS-SSL, $\\lambda$=0.1" \
+  "WS-SSL, $\\lambda$=1" \
+  "WS-SSL, $\\lambda$=10" \
+  "WS-SSL, $\\lambda$=20" \
+  --style dashed dotted dotted dotted solid dotted \
+  --color red None None None black None

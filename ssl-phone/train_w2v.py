@@ -41,6 +41,8 @@ parser.add_argument("--mask-len", type=int, required=False, default=10)
 parser.add_argument("--ssl-from-ema", action='store_true')
 parser.add_argument("--ssl-ema-beta", type=float, required=False, default=0.9)
 parser.add_argument("--ssl-ema-update", type=int, required=False, default=1)
+parser.add_argument("--ewc", action='store_true')
+parser.add_argument("--ewc-lambda", type=float, required=False, default=0.01)
 parser.add_argument("--output", type=str, required=True) 
 parser.add_argument("--timit", action='store_true')
 parser.add_argument("--warm-start", type=str, required=False, default=None)
@@ -49,21 +51,25 @@ parser.add_argument("--from-init", action='store_true')
 parser.add_argument("--profile", action='store_true')
 args = parser.parse_args()
 
+if args.ewc and args.ssl_from_ema:
+  import sys
+  sys.exit('--ewc and --ssl-from-ema cannot co-exist')
+
 if args.timit:
   if args.save_step is None: args.save_step = 100
   if args.train_step is None: args.train_step = 2000
   if args.lr_decay_step is None: args.lr_decay_step = 300
   # different phoneme size unit; require different TIMIT segmentation
-  if args.eval_list is None: args.eval_list = "/hdd1/hejung/timit/test_w2v.wav.phone"
+  if args.eval_list is None: args.eval_list = "/data/hejung/timit/test_w2v.wav.phone"
 
 else:
   if args.save_step is None: args.save_step = 10000
   if args.train_step is None: args.train_step = 45000
   if args.lr_decay_step is None: args.lr_decay_step = 4000
-  if args.eval_list is None: args.eval_list = "/hdd1/hejung/librispeech/test-clean.flac.phone"
+  if args.eval_list is None: args.eval_list = "/data/hejung/librispeech/test-clean.flac.phone"
   
   from text import WordTextEncoder
-  path = "/hdd1/hejung/librispeech"
+  path = "/data/hejung/librispeech"
   tokenizer = WordTextEncoder.load_from_file(
     os.path.join(path, "vocab/phoneme.txt"))
 
@@ -208,6 +214,9 @@ if args.ssl_tfrec is not None:
 lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
+if args.ewc:
+  import ewc_w2v
+
 import wav2vec2
 if args.timit:
   m = wav2vec2.wav2vec2_phone(num_class=50, use_last=False, use_layers=3,
@@ -215,26 +224,33 @@ if args.timit:
   m_ema = wav2vec2.wav2vec2_phone(num_class=50, use_last=False, use_layers=3,
     num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
   is_ctc = False
+  if args.ewc:
+    m_ewc = wav2vec2.wav2vec2_phone(num_class=50, use_last=False, use_layers=3,
+      num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
 else:
   m = wav2vec2.wav2vec2_phone(use_last=False, use_layers=12,
     num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
   m_ema = wav2vec2.wav2vec2_phone(use_last=False, use_layers=12,
     num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
   is_ctc = True
+  if args.ewc:
+    m_ewc = wav2vec2.wav2vec2_phone(use_last=False, use_layers=12,
+      num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
 
 _in = np.zeros((args.batch_size, samp_len), dtype=np.float32)
 _ref = np.zeros((args.batch_size, txt_len), dtype=np.int32)
 _in_len = np.ones((args.batch_size, 1), dtype=np.int32) * samp_len
 _ref_len = np.ones((args.batch_size, 1), dtype=np.int32) * txt_len
 
+# in EWC, gradients on quantizers should be generated
+do_ssl_loss = (not (args.ssl_weight == 0)) or args.ewc
 _ = m((_in, _ref, _in_len, _ref_len),
-  training = True,
-  ssl_loss = (not (args.ssl_weight == 0)),
-  ctc = True)
+  training = True, ssl_loss = do_ssl_loss, ctc = True)
 _ = m_ema((_in, _ref, _in_len, _ref_len),
-  training = True,
-  ssl_loss = (not (args.ssl_weight == 0)),
-  ctc = True)
+  training = True, ssl_loss = do_ssl_loss, ctc = True)
+if args.ewc:
+  _ = m_ewc((_in, _ref, _in_len, _ref_len),
+    training = True, ssl_loss = do_ssl_loss, ctc = True)
 
 accum_grads = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights]
 
@@ -314,9 +330,14 @@ def run_step(step, pcm, ssl_pcm, txt,
       sloss = ssl_weight * sloss
       total_loss = loss + sloss
 
+      if args.ewc:
+        ewc_loss = ewc_w2v.ewc_loss(args.ewc_lambda, m, 
+          m_ewc.trainable_weights, (ssl_pcm, ssl_samp_len))
+        sloss = ewc_loss(m)
+        total_loss += sloss
+
   if training:
     weights = m.trainable_weights
-
     grads = tape.gradient(total_loss, weights)
     grads, _ = tf.clip_by_global_norm(grads, 5.)
             
@@ -393,6 +414,8 @@ logger.addHandler(fh)
 
 ckpt = tf.train.Checkpoint(m)
 ema_ckpt = tf.train.Checkpoint(m_ema)
+if args.ewc:
+  ewc_ckpt = tf.train.Checkpoint(m_ewc)
 prev_val_loss = None; stall_cnt = 0
 
 init_epoch = 0
@@ -419,9 +442,13 @@ if args.warm_start is not None:
     # ignore projections used for pretraining
     ckpt.read(args.warm_start).expect_partial()
     ema_ckpt.read(args.warm_start).expect_partial()
+    if args.ewc:
+      ewc_ckpt.read(args.warm_start).expect_partial()
   else:
     ckpt.read(args.warm_start).assert_consumed()
     ema_ckpt.read(args.warm_start).assert_consumed()
+    if args.ewc:
+      ewc_ckpt.read(args.warm_start).assert_consumed()
 
   if not args.from_init:
     if isinstance(opt_weight, np.ndarray):

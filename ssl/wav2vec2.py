@@ -353,15 +353,16 @@ class wav2vec2_seq(tf.keras.layers.Layer):
 
   def build(self, input_shape):
     self.wav2vec2 = wav2vec2()
-    self.projector = tf.keras.layers.Dense(256, use_bias=True)
-    self.classifier = tf.keras.layers.Dense(12, use_bias=True)
+    #self.projector = tf.keras.layers.Dense(256, use_bias=True)
+    #self.classifier = tf.keras.layers.Dense(12, use_bias=True)
   
   def call(self, inputs, training=None):
     x = inputs
-    x, fes, encs = self.wav2vec2(x)
-    x = self.projector(x)
-    x = tf.math.reduce_mean(x, 1)
-    x = self.classifier(x)
+    fes, encs = self.wav2vec2(x)
+    x = encs[-1]
+    #x = self.projector(x)
+    #x = tf.math.reduce_mean(x, 1)
+    #x = self.classifier(x)
     return x
 
 class wav2vec2_unet(tf.keras.layers.Layer):
