@@ -1,7 +1,6 @@
 import tensorflow as tf
 from util import *
 from spec_ops import *
-from mask import mask_tera
 
 tf_sum = tf.math.reduce_sum
 tf_expd = tf.expand_dims
@@ -148,14 +147,6 @@ class encoder(tf.keras.layers.Layer):
 
     return encs
 
-def tera_spec(x, n_fft, hop_len):
-  x = _normalize_wav_decibel(x)
-  x = melspec(x, num_mel_bins=80,
-    frame_length=n_fft, frame_step=hop_len, fft_length=n_fft,
-    lower_edge_hertz=0., upper_edge_hertz=8000.)
-
-  return x
-
 class tera(tf.keras.layers.Layer):
   def __init__(self, n_fft, hop_len, *args, **kwargs):
     super(tera, self).__init__(*args, **kwargs)
@@ -166,37 +157,17 @@ class tera(tf.keras.layers.Layer):
     self.fe = inputrep()
     self.enc = encoder()
   
-  def call(self, inputs, training=None, feat=False):
+  def call(self, inputs, training=None):
     x = inputs
 
-    if not feat:
-      x = tera_spec(x, self.n_fft, self.hop_len)
-    x_feat = x
+    x = _normalize_wav_decibel(x)
+    x = melspec(x, num_mel_bins=80,
+      frame_length=self.n_fft, frame_step=self.hop_len, fft_length=self.n_fft,
+      lower_edge_hertz=0., upper_edge_hertz=8000.)
     x = self.fe(x)
 
     attn_mask = tf.zeros([1, 1, 1, tf.shape(x)[1]])
     x = self.enc((x, attn_mask))
-
-    return x_feat, x
-
-class pred_head(tf.keras.layers.Layer):
-  def __init__(self, out_dim=80, *args, **kwargs):
-    self.out_dim = out_dim
-    super(pred_head, self).__init__(*args, **kwargs)
-
-  def build(self, input_shape):
-    dim = input_shape[-1]
-    self.dense = tf.keras.layers.Dense(dim)
-    self.lnorm = lnorm(affine=True, eps=1e-12)
-    self.out = tf.keras.layers.Dense(self.out_dim)
-  
-  def call(self, inputs, training=None):
-    x = inputs
-
-    x = self.dense(x)
-    x = tf.keras.activations.gelu(x)
-    x = self.lnorm(x)
-    x = self.out(x)
 
     return x
 
@@ -206,13 +177,10 @@ class tera_seq(tf.keras.layers.Layer):
 
   def build(self, input_shape):
     self.tera = tera(400, 160)
-    self.spechead = pred_head()
   
-  def call(self, inputs, training=None, feat=False):
+  def call(self, inputs, training=None):
     x = inputs
-    x_feat, _x = self.tera(x, feat=feat)
-    x = self.spechead(_x[-1])
-    return x_feat, _x[-1], x
+    return self.tera(x)
 
 class tera_unet(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
@@ -232,7 +200,7 @@ class tera_unet(tf.keras.layers.Layer):
   def build(self, input_shape):
     conv_opt = dict(padding='same', use_bias=False)
 
-    self.tera = tera_seq()#tera(self.n_fft, self.hop_len)
+    self.tera = tera(self.n_fft, self.hop_len)
 
     self.conv_r = conv1d(self.n_fft//2+1, 3, **conv_opt)
     self.conv_i = conv1d(self.n_fft//2+1, 3, **conv_opt)
@@ -247,7 +215,8 @@ class tera_unet(tf.keras.layers.Layer):
 
     _in = x
 
-    x_feat, x, _ = self.tera(x)
+    xs = self.tera(x)
+    x = xs[-1]
 
     x = tf.keras.activations.gelu(x)
     #x = tf.stop_gradient(x)
@@ -297,15 +266,6 @@ class tera_unet(tf.keras.layers.Layer):
       return Cr, Ci
 
     if ref is not None:
-      x_mask, mask_label = mask_tera(x_feat)
-      mask_label = tf.cast(mask_label, tf.float32)
-      _, _, seq_out = self.tera(x_mask, feat=True)
-      seq_loss = tf.math.abs(mask_label * (x_feat - seq_out))
-
-      seq_loss = tf.math.reduce_sum(seq_loss, [-1, -2])
-      denom = tf.math.reduce_sum(mask_label, [-1, -2])
-      seq_loss /= (denom + 1e-9)
-
       x = x[..., :tf.shape(ref)[-1]]
       samp_loss = tf.math.reduce_mean((x - ref) ** 2, -1)
 
@@ -329,9 +289,9 @@ class tera_unet(tf.keras.layers.Layer):
       spec_loss += stft_loss(x, ref, 10, 2, 512)
 
       Cr, Ci = get_cirm(Yr, Yi, ref)
-      cirm_loss = tf.math.reduce_mean(tf.math.abs(Cr - x_r))
-      cirm_loss += tf.math.reduce_mean(tf.math.abs(Ci - x_i))
+      cirm_loss = tf.math.reduce_mean(tf.math.abs(Cr - x_r), [-1, -2])
+      cirm_loss += tf.math.reduce_mean(tf.math.abs(Ci - x_i), [-1, -2])
 
-      return samp_loss + spec_loss, cirm_loss, seq_loss
+      return samp_loss + spec_loss, cirm_loss
 
     return x

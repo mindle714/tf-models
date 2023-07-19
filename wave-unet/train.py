@@ -5,7 +5,7 @@ import tensorflow as tf
 
 seed = 1234
 os.environ['PYTHONHASHSEED'] = str(seed)
-os.environ['TF_DETERMINISTIC_OPS'] = '1'
+#os.environ['TF_DETERMINISTIC_OPS'] = '1'
 random.seed(seed)
 np.random.seed(seed)
 tf.random.set_seed(seed)
@@ -106,12 +106,14 @@ log_writer.set_as_default()
 @tf.function
 def run_step(step, pcm, ref, training=True):
   with tf.GradientTape() as tape, log_writer.as_default():
-    loss = m((pcm, ref), training=training)
+    loss, conv_loss = m((pcm, ref), training=training)
     loss = tf.math.reduce_mean(loss)
     tf.summary.scalar("loss", loss, step=step)
+    tf.summary.scalar("conv_loss", conv_loss, step=step)
+    total_loss = loss + conv_loss
 
   if training:
-    grads = tape.gradient(loss, m.trainable_weights)
+    grads = tape.gradient(total_loss, m.trainable_weights)
     grads, _ = tf.clip_by_global_norm(grads, 5.)
     opt.apply_gradients(zip(grads, m.trainable_weights))
 

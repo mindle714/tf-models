@@ -139,6 +139,124 @@ class conv1dtrans(tf.keras.layers.Layer):
 conv2d = tf.keras.layers.Conv2D
 conv2dtrans = tf.keras.layers.Conv2DTranspose
 
+class depthconv1d(tf.keras.layers.Layer):
+  def __init__(self, *args, **kwargs):
+    self.conv_args = args
+    self.conv_kwargs = kwargs
+
+    self.strides = 1
+    if "strides" in kwargs:
+      self.strides = kwargs["strides"]
+
+    self.padding = "SAME"
+    if "padding" in kwargs:
+      self.padding = kwargs["padding"].upper()
+
+    super(depthconv1d, self).__init__()
+  
+  def build(self, input_shape):
+    dim = input_shape[-1]
+    self.dim = dim
+
+    #self.conv_kwargs["use_bias"] = False
+    #self.convs = [tf.keras.layers.Conv1D(1, self.conv_args[0], 
+    #    **self.conv_kwargs) for _ in range(dim)]
+    '''
+    minmax = 1. / tf.cast(self.conv_args[0] * dim, tf.float32)
+    minmax = tf.math.sqrt(minmax)
+    
+    kernel_init = tf.keras.initializers.RandomUniform(
+      minval=-minmax, maxval=minmax)
+    '''
+    kernel_init = tf.keras.initializers.GlorotUniform()
+
+    self.kernel = self.add_weight(shape=(self.conv_args[0], dim, 1),
+      initializer=kernel_init, name="kernel")
+    self.bias = self.add_weight(shape=(dim), initializer="zeros", name="bias")
+
+  def call(self, inputs, training=None):
+    x = inputs
+
+    '''
+    x_chs = []
+    for idx in range(self.dim):
+      x_ch = tf.slice(x, [0, 0, idx], [-1, -1, 1])
+      kernel_ch = tf.slice(self.kernel, [0, idx, 0], [-1, 1, -1])
+
+      x_ch = tf.nn.conv1d(x_ch, kernel_ch, self.strides, self.padding) 
+      x_chs.append(x_ch)
+    x = tf.concat(x_chs, -1)
+    '''
+    x = tf.nn.depthwise_conv2d(tf.expand_dims(x, 1),
+      tf.expand_dims(self.kernel, 0),
+      strides=[1, self.strides, self.strides, 1],
+      padding=self.padding)
+    x = tf.squeeze(x, 1)
+
+    x = x + tf.reshape(self.bias, [1, 1, -1])
+
+    return x
+
+class depthconv1dtrans(tf.keras.layers.Layer):
+  def __init__(self, *args, **kwargs):
+    self.conv_args = args
+    self.conv_kwargs = kwargs
+
+    self.strides = 1
+    if "strides" in kwargs:
+      self.strides = kwargs["strides"]
+
+    self.padding = "SAME"
+    if "padding" in kwargs:
+      self.padding = kwargs["padding"].upper()
+
+    super(depthconv1dtrans, self).__init__()
+  
+  def build(self, input_shape):
+    dim = input_shape[-1]
+    self.dim = dim
+
+    #self.conv_kwargs["use_bias"] = False
+    #self.convs = [tf.keras.layers.Conv1D(1, self.conv_args[0], 
+    #    **self.conv_kwargs) for _ in range(dim)]
+    '''
+    minmax = 1. / tf.cast(self.conv_args[0] * dim, tf.float32)
+    minmax = tf.math.sqrt(minmax)
+    
+    kernel_init = tf.keras.initializers.RandomUniform(
+      minval=-minmax, maxval=minmax)
+    '''
+    kernel_init = tf.keras.initializers.GlorotUniform()
+
+    self.kernel = self.add_weight(shape=(self.conv_args[0], dim, 1),
+      initializer=kernel_init, name="kernel")
+    self.bias = self.add_weight(shape=(dim), initializer="zeros", name="bias")
+
+  def call(self, inputs, training=None):
+    x = inputs
+
+    '''
+    x_chs = []
+    for idx in range(self.dim):
+      x_ch = tf.slice(x, [0, 0, idx], [-1, -1, 1])
+      kernel_ch = tf.slice(self.kernel, [0, idx, 0], [-1, 1, -1])
+
+      x_ch = tf.nn.conv1d_transpose(x_ch, kernel_ch, 
+        [tf.shape(x)[0], tf.shape(x)[1]*self.strides, 1], 
+        self.strides, self.padding) 
+      x_chs.append(x_ch)
+    x = tf.concat(x_chs, -1)
+    '''
+    x = tf.nn.depthwise_conv2d(tf.expand_dims(x, 1),
+      tf.expand_dims(self.kernel, 0),
+      strides=[1, self.strides, self.strides, 1],
+      padding=self.padding)
+    x = tf.squeeze(x, 1)
+
+    x = x + tf.reshape(self.bias, [1, 1, -1])
+
+    return x
+
 class gnorm(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
     super(gnorm, self).__init__(*args, **kwargs)

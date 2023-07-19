@@ -16,32 +16,17 @@ parser.add_argument("--tfrec", type=str, required=True)
 parser.add_argument("--val-tfrec", type=str, required=False, default=None)
 parser.add_argument("--batch-size", type=int, required=False, default=8) 
 parser.add_argument("--eval-step", type=int, required=False, default=100) 
-parser.add_argument("--save-step", type=int, required=False, default=10000) 
-parser.add_argument("--val-step", type=int, required=False, default=10000) 
-parser.add_argument("--train-step", type=int, required=False, default=50000) 
+parser.add_argument("--save-step", type=int, required=False, default=1000) 
+parser.add_argument("--val-step", type=int, required=False, default=5000) 
+parser.add_argument("--train-step", type=int, required=False, default=100000) 
 parser.add_argument("--begin-lr", type=float, required=False, default=1e-4) 
 parser.add_argument("--lr-decay-rate", type=float, required=False, default=0.96)
 parser.add_argument("--lr-decay-step", type=float, required=False, default=2000.)
 parser.add_argument("--val-lr-update", type=float, required=False, default=3) 
-parser.add_argument("--begin-factors", type=float, nargs="+", default=[])
-parser.add_argument("--beta-r", type=float, required=False, default=0.999) 
-parser.add_argument("--beta-m", type=float, required=False, default=0.99)
-parser.add_argument("--fnorm-schedule", type=str, required=False,
-  choices=["linear", "exp", "cos", "stair"], default="linear")
-parser.add_argument("--fnorm-steps", type=float, nargs="+", default=[])
-parser.add_argument("--fnorm-decay", type=float, required=False, default=100) 
 parser.add_argument("--output", type=str, required=True) 
 parser.add_argument("--warm-start", type=str, required=False, default=None)
 parser.add_argument("--from-init", action='store_true')
 args = parser.parse_args()
-
-if len(args.fnorm_steps) == 0:
-  args.fnorm_steps = [70000, 70000, 70000]
-assert len(args.fnorm_steps) == 3
-
-if len(args.begin_factors) == 0:
-  args.begin_factors = [0., 0., 0.]
-assert len(args.begin_factors) == 3
 
 import json
 tfrec_args = os.path.join(args.tfrec, "ARGS")
@@ -103,7 +88,12 @@ lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
 import tera
-m = tera.tera_unet(args.beta_r, args.beta_m)
+m = tera.tera_unet()
+m_frozen = tera.tera_unet()
+  
+_in = np.zeros((args.batch_size, samp_len), dtype=np.float32)
+_ = m((_in, None))
+print(len(m.trainable_weights))
 
 specs = [val.__spec__ for name, val in sys.modules.items() \
   if isinstance(val, types.ModuleType) and not ('_main_' in name)]
@@ -119,30 +109,102 @@ logdir = os.path.join(args.output, "logs")
 log_writer = tf.summary.create_file_writer(logdir)
 log_writer.set_as_default()
 
+def jacobian(y, x, tape):
+  grads = []
+  for _y in y:
+    _grads = tape.gradient(_y, x)
+    if len(grads) == 0:
+      grads = [tf.expand_dims(e, 0) for e in _grads]
+    else:
+      for idx, grad in enumerate(_grads):
+        grads[idx] = tf.concat([grads[idx],
+          tf.expand_dims(grad, 0)], 0)
+  return grads
+
 @tf.function
-def run_step(step, pcm, ref, training=True):
-  with tf.GradientTape() as tape, log_writer.as_default():
-    loss, closs, sim = m((pcm, ref), training=training)
-    loss = tf.math.reduce_mean(loss)
-    tf.summary.scalar("loss", loss, step=step)
-    closs = tf.math.reduce_mean(closs)
-    tf.summary.scalar("closs", closs, step=step)
-    sim = tf.math.reduce_mean(sim)
-    tf.summary.scalar("sim", sim, step=step)
+def run_step(step, pcm, ref, training=True, num_minibatch=4):
+  assert args.batch_size % num_minibatch == 0
+
+  '''
+  with tf.GradientTape(persistent=True) as tape, log_writer.as_default():
+    loss_frozen, _ = m_frozen((pcm, ref), training=False)
+    loss_frozen = tf.reshape(loss_frozen, [num_minibatch, -1])
+    loss_frozen = tf.math.reduce_mean(loss_frozen, -1)
+#    loss_frozen = tf.unstack(loss_frozen, axis=0)
+  
+  if training:
+    jac_frozen = tape.jacobian(loss_frozen, m_frozen.trainable_weights)
+#    jac_frozen = jacobian(loss_frozen, m_frozen.trainable_weights, tape)
+  '''
+
+  with tf.GradientTape(persistent=True) as tape, log_writer.as_default():
+    loss, closs = m((pcm, ref), training=training)
+    loss = tf.reshape(loss, [num_minibatch, -1])
+    loss = tf.math.reduce_mean(loss, -1)
+    closs = tf.reshape(closs, [num_minibatch, -1])
+    closs = tf.math.reduce_mean(closs, -1)
+
+    _loss = tf.math.reduce_mean(loss)
+    tf.summary.scalar("loss", _loss, step=step)
+    _closs = tf.math.reduce_mean(closs)
+    tf.summary.scalar("closs", _closs, step=step)
     total_loss = loss + closs
+#    total_loss = tf.unstack(total_loss, axis=0)
 
   if training:
-    train_weights = [e for e in m.trainable_weights if 'frozen' not in e.name]
-    assert len(m.trainable_weights) - len(train_weights) == 52
-    grads = tape.gradient(total_loss, train_weights)
-    gnorm = tf.linalg.global_norm(grads)
+#    grads = tape.gradient(total_loss, m.trainable_weights)
+    jac = tape.jacobian(total_loss, m.trainable_weights)
+#    jac = jacobian(total_loss, m.trainable_weights, tape)
+#    grads = [tf.math.reduce_sum(e, 0) for e in jac]
+#    grads_tile = [tf.tile(tf.expand_dims(e, 0), 
+#      tf.concat([[args.batch_size], tf.ones_like(tf.shape(e))], 0)) for e in grads]
+
+    grads = []
+    for idx in range(len(jac)):
+      batch_size = tf.shape(jac[idx])[0]
+
+      grad = tf.math.reduce_sum(jac[idx], 0)
+      grad_tile = tf.tile(tf.expand_dims(grad, 0), 
+        tf.concat([[batch_size], tf.ones_like(tf.shape(grad))], 0))
+
+      x = tf.reshape(jac[idx], [batch_size, -1])
+      w = tf.reshape(grad_tile, [batch_size, -1])
+
+      def dot_prod(e1, e2, norm=False):
+        _dot = tf.linalg.matmul(
+          tf.expand_dims(e1, 1), tf.expand_dims(e2, 2))
+        _dot = tf.squeeze(_dot, [-1, -2])
+        if norm:
+          _dot /= tf.norm(e1, axis=-1) * tf.norm(e2, axis=-1)
+        return _dot
+
+#      z = tf.reshape(jac_frozen[idx], [batch_size, -1])
+      z = - m_frozen.trainable_weights[idx] + m.trainable_weights[idx]
+      z = (z / (tf.norm(z) + 1e-9)) * tf.norm(w[0])
+      z = tf.reshape(z, [1, -1])
+
+      r = tf.norm(w, axis=-1) / tf.norm(x, axis=-1)
+      r *= dot_prod(w, w+z, norm=True)
+      r /= dot_prod(x, w+z, norm=True)
+
+      denom = dot_prod(w, x) - r * dot_prod(x, x)
+      num = dot_prod(w, w) - r * dot_prod(w, x)
+      b = - tf.math.divide_no_nan(num, denom)
+
+      weight = b - tf.math.reduce_mean(b)
+      weight /= (tf.math.reduce_std(weight) + 1e-9)
+      weight *= 0.1
+      weight += 1.
+
+      wgrad = tf.reshape(weight, [batch_size] + \
+        [1 for _ in range(len(tf.shape(jac[idx])) - 1)]) * jac[idx]
+
+      grads.append(tf.math.reduce_sum(wgrad, 0))
+
     grads, _ = tf.clip_by_global_norm(grads, 5.)
-    opt.apply_gradients(zip(grads, train_weights))
+    opt.apply_gradients(zip(grads, m.trainable_weights))
 
-    #for grad, var in zip(grads, train_weights):
-    #  tf.summary.histogram(var.name + "/gradient", grad, step=step)
-
-  return loss, closs, sim
+  return _loss, _closs, weight
 
 import logging
 logger = tf.get_logger()
@@ -154,6 +216,7 @@ fh = logging.FileHandler(logfile)
 logger.addHandler(fh)
 
 ckpt = tf.train.Checkpoint(m)
+ckpt_frozen = tf.train.Checkpoint(m_frozen)
 prev_val_loss = None; stall_cnt = 0
 
 init_epoch = 0
@@ -177,10 +240,10 @@ if args.warm_start is not None:
       opt_cfg = np.load(opt_cfg, allow_pickle=True).flatten()[0] 
 
   _in = np.zeros((args.batch_size, samp_len), dtype=np.float32)
-  _ = m(_in)
-  _ = m.tera(_in)
-  _ = m.tera_frozen(_in)
+  _ = m((_in, None))
   ckpt.read(args.warm_start).assert_consumed()
+  _ = m_frozen((_in, None))
+  ckpt_frozen.read(args.warm_start).assert_consumed()
 
   if not args.from_init:
     if isinstance(opt_weight, np.ndarray):
@@ -192,52 +255,19 @@ if args.warm_start is not None:
       opt.apply_gradients(zip(zero_grads, grad_vars))
       opt.set_weights(opt_weight)
 
-def cos_decay(step, decay_steps, init_lr, alpha=0.):
-  step = min(step, decay_steps)
-  cosine_decay = 0.5 * (1 + np.cos(np.pi * step / decay_steps))
-  decayed = (1 - alpha) * cosine_decay + alpha
-  return init_lr * decayed
-
-def exp_decay(step, decay_steps, init_lr, end_lr=0.01):
-  if step > decay_steps: return 0.
-  if init_lr <= 0.: return 0.
-  decay_rate = end_lr / init_lr
-  return init_lr * decay_rate ** (step / decay_steps)
-
-def linear_decay(step, decay_steps, init_lr, end_lr = 0.):
-  if step > decay_steps: return end_lr
-  return ((end_lr - init_lr) / decay_steps) * step + init_lr
-
-def stair_decay(step, decay_steps, init_lr, end_lr = 0., decay_unit = args.fnorm_decay):
-  if step > decay_steps: return end_lr
-  _step = (step // decay_unit) * decay_unit
-  return ((end_lr - init_lr) / decay_steps) * _step + init_lr
-
-if args.fnorm_schedule == "linear":
-  factor_decay = linear_decay
-elif args.fnorm_schedule == "exp":
-  factor_decay = exp_decay
-elif args.fnorm_schedule == "cos":
-  factor_decay = cos_decay
-elif args.fnorm_schedule == "stair":
-  factor_decay = stair_decay
-else:
-  assert False, "unknown type {}".format(args.fnorm_schedule)
-
 for idx, data in enumerate(dataset):
   idx += init_epoch
   if idx > args.train_step: break
 
-  for i in range(3):
-    m.tera.enc.factors[i].assign(
-      factor_decay(idx, args.fnorm_steps[i], args.begin_factors[i])) 
+  m_frozen.conv_r.set_weights(m.conv_r.get_weights())
+  m_frozen.conv_i.set_weights(m.conv_i.get_weights())
 
-  loss, closs, sim = run_step(tf.cast(idx, tf.int64), data["pcm"], data["ref"])
+  loss, closs, weight = run_step(tf.cast(idx, tf.int64), data["pcm"], data["ref"])
   log_writer.flush()
 
   if idx > init_epoch and idx % args.eval_step == 0:
-    logger.info("gstep[{}] loss[{:.2f}] closs[{:.2f}] lr[{:.2e}] flr[{}] sim[{:.4f}]".format(
-      idx, loss, closs, lr.numpy(), ",".join([str("{:.2f}".format(e.numpy())) for e in m.tera.enc.factors]), sim))
+    logger.info("gstep[{}] loss[{:.2f}] closs[{:.2f}] lr[{:.2e}] weight[{}]".format(
+      idx, loss, closs, lr.numpy(), ",".join([str("{:.2f}".format(e.numpy())) for e in weight])))
 
   if val_dataset is None:
     # follow tf.keras.optimizers.schedules.ExponentialDecay

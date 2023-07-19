@@ -13,7 +13,7 @@ def log10(x):
 import itertools
 
 # ref[batch, timestep, mixture], hyp[..]
-def si_snr(ref, hyp, mask=None, pit=True, eps=1e-8, return_ref=False):
+def si_snr(ref, hyp, mask=None, pit=True, eps=1e-8):
   def norm_mean(e):
     if mask is not None:
       m, _ = tf.nn.weighted_moments(e, [1], mask, keepdims=True)
@@ -22,7 +22,6 @@ def si_snr(ref, hyp, mask=None, pit=True, eps=1e-8, return_ref=False):
 
     return e - m
 
-  _ref = ref
   ref = norm_mean(ref)
   hyp = norm_mean(hyp)
 
@@ -65,10 +64,7 @@ def si_snr(ref, hyp, mask=None, pit=True, eps=1e-8, return_ref=False):
     max_perm = tf.gather(perms, perm_id)
     sort_hyp = tf.linalg.matmul(tf.squeeze(hyp, -1), max_perm)
 
-    if not return_ref:
-      return max_snr, sort_hyp
-    else:
-      return max_snr, sort_hyp, tf.linalg.matmul(_ref, max_perm)
+    return max_snr, sort_hyp
 
   return snr, hyp
 
@@ -260,6 +256,25 @@ class conv1dtrans(tf.keras.layers.Layer):
 
 conv2d = tf.keras.layers.Conv2D
 conv2dtrans = tf.keras.layers.Conv2DTranspose
+
+'''
+class conv2d(tf.keras.layers.Layer):
+  def __init__(self, *args, **kwargs):
+    self.conv_args = args
+    self.conv_kwargs = kwargs
+    super(conv2d, self).__init__()
+
+  def build(self, input_shape):
+    if isinstance(input_shape, tuple): dim = input_shape[0][-1]
+    else: dim = input_shape[-1]
+
+    if self.conv_args[0] is None: self.conv_args = (dim, self.conv_args[1])
+    self.conv = tf.keras.layers.Conv2D(*self.conv_args, **self.conv_kwargs)
+
+  def call(self, inputs, training=None):
+    x = inputs
+    return self.conv(x)
+'''
 
 class gnorm(tf.keras.layers.Layer):
   def __init__(self, num_groups=1, *args, **kwargs):
