@@ -3,14 +3,14 @@ import tensorflow as tf
 import torch
 m = torch.load("/home/hejung/data2vec-audio-base-960h/pytorch_model.bin")
 
-from data2vec import *
+from data2vec_sep import *
 
 model = data2vec_unet()
 
 import numpy as np
 pcm = np.zeros(16000)
 _in = np.reshape(pcm, [1, -1])
-_tmp = model((_in, _in))
+_tmp = model((_in, _in, _in))
 
 def load_norm(prefix, e):
   w = m['{}.weight'.format(prefix, i)].cpu().numpy()
@@ -66,4 +66,4 @@ for i, layer in enumerate(model.data2vec.enc.layers):
 '''
 
 ckpt = tf.train.Checkpoint(model)
-ckpt.write("data2vec_base_v2.ckpt")
+ckpt.write("data2vec_sep_base_v2.ckpt")

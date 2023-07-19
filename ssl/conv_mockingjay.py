@@ -63,4 +63,4 @@ for i in range(3):
   model.mockingjay.enc.layers[i].lnorm.beta.assign(b)
 
 ckpt = tf.train.Checkpoint(model)
-ckpt.write("mockingjay_base3.ckpt")
+ckpt.write("mockingjay_base4.ckpt")

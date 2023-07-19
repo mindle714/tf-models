@@ -10,11 +10,12 @@ model = wav2vec2_unet()
 import numpy as np
 pcm = np.zeros(16000)
 _in = np.reshape(pcm, [1, -1])
-_tmp = model((_in, _in))
+_tmp = model(_in)
+_tmp = model.wav2vec2(_in.reshape([1, -1, 1]))
 
 def load_norm(prefix, e):
-  w = m['{}.weight'.format(prefix, i)].cpu().numpy()
-  b = m['{}.bias'.format(prefix, i)].cpu().numpy()
+  w = m['{}.weight'.format(prefix)].cpu().numpy()
+  b = m['{}.bias'.format(prefix)].cpu().numpy()
   e.gamma.assign(w)
   e.beta.assign(b)
 
@@ -71,4 +72,4 @@ for i, layer in enumerate(model.wav2vec2.enc.layers):
 '''
 
 ckpt = tf.train.Checkpoint(model)
-ckpt.write("wav2vec2_base_v4.ckpt")
+ckpt.write("wav2vec2_floss_base.ckpt")
