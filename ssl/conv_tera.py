@@ -63,4 +63,4 @@ for i in range(3):
   model.tera.enc.layers[i].lnorm.beta.assign(b)
 
 ckpt = tf.train.Checkpoint(model)
-ckpt.write("tera_base3.ckpt")
+ckpt.write("tera_nfloss_base.ckpt")

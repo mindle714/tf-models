@@ -1,4 +1,5 @@
 librispeech_960
-exps/
+exps
 vbank_demand_28
 __pycache__/
+tffts.ckpt.*

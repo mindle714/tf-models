@@ -54,4 +54,4 @@ var = m['norm_out.running_var'].cpu().numpy()
 model.pasep.rnn_norm.set_weights([mean, var])
 
 ckpt = tf.train.Checkpoint(model)
-ckpt.write("pasep_base2.ckpt")
+ckpt.write("pasep_base4.ckpt")
