@@ -245,38 +245,18 @@ class tera_phone(tf.keras.layers.Layer):
     self.linear = tf.keras.layers.Dense(self.num_class, use_bias=True)
   
   def call(self, inputs, training=None, 
-           ssl_loss=False, stop_grad=False, ctc=True,
-           ssl_only=False):
-    if ssl_only:
-      assert isinstance(inputs, tuple) and len(inputs) == 2
-      x_feat, x_feat_len = inputs
-
-      x_mask, mask_label = mask_tera(x_feat, x_feat_len)
-      mask_label = tf.cast(mask_label, tf.float32)
-      _, seq_out = self.tera((x_mask, x_feat_len))
-
-      return mask_label, seq_out
-
+           stop_grad=False, ctc=True):
     mask_label = None
-    if isinstance(inputs, tuple) and len(inputs) == 7:
-      x, x_feat, ref, x_len, x_feat_len, ref_len, mask_label = inputs
-    
-    elif isinstance(inputs, tuple) and len(inputs) == 6:
-      x, x_feat, ref, x_len, x_feat_len, ref_len = inputs
-    
-    elif isinstance(inputs, tuple) and len(inputs) == 4:
+    if isinstance(inputs, tuple) and len(inputs) == 4:
       x, ref, x_len, ref_len = inputs
-      x_feat = x; x_feat_len = x_len
     
     elif isinstance(inputs, tuple) and len(inputs) == 2:
       x, x_len = inputs
-      x_feat = x; x_feat_len = x_len
       ref = None; ref_len = None
 
     else:
       x = inputs
       x_len = None
-      x_feat = x; x_feat_len = x_len
       ref = None; ref_len = None
 
     if x_len is not None:
@@ -297,23 +277,6 @@ class tera_phone(tf.keras.layers.Layer):
     x = self.linear(x)
 
     if ref is not None:
-      seq_loss = 0.
-      seq_out = tf.zeros_like(x_feat)
-
-      if ssl_loss:
-        if mask_label is None:
-          x_mask, mask_label = mask_tera(x_feat, x_feat_len)
-          mask_label = tf.cast(mask_label, tf.float32)
-        else:
-          x_mask = (1. - mask_label) * x_feat
-
-        _, seq_out = self.tera((x_mask, x_feat_len))
-        seq_loss = tf.math.abs(mask_label * (x_feat - seq_out))
-
-        seq_loss = tf.math.reduce_sum(seq_loss, [-1, -2])
-        denom = tf.math.reduce_sum(mask_label, [-1, -2])
-        seq_loss /= (denom + 1e-9)
-
       if ctc:
         ctc_loss = _ctc_loss(
           tf.cast(ref, tf.int32), x, 
@@ -321,7 +284,7 @@ class tera_phone(tf.keras.layers.Layer):
           tf.squeeze(tf.cast(x_len, tf.int32), -1), 
           blank_index=0)
 
-        return ctc_loss, seq_loss, seq_out
+        return ctc_loss
 
       else:
         _ce_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
@@ -336,6 +299,6 @@ class tera_phone(tf.keras.layers.Layer):
         ce_loss = tf.math.reduce_sum(ce_loss)
         ce_loss /= (tf.math.reduce_sum(ce_mask) + 1e-9)
 
-        return ce_loss, seq_loss, seq_out
+        return ce_loss
 
     return x
