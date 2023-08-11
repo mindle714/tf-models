@@ -15,8 +15,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--tfrec", type=str, required=True) 
 parser.add_argument("--val-tfrec", type=str, required=False, default=None)
 parser.add_argument("--eval-list", type=str, required=False, default=None) 
-parser.add_argument("--batch-size", type=int, required=False, default=8) 
-parser.add_argument("--accum-step", type=int, required=False, default=2)
+parser.add_argument("--batch-size", type=int, required=False, default=4) 
+parser.add_argument("--accum-step", type=int, required=False, default=4)
 parser.add_argument("--eval-step", type=int, required=False, default=100) 
 parser.add_argument("--save-step", type=int, required=False, default=None) 
 parser.add_argument("--val-step", type=int, required=False, default=5000) 
@@ -35,9 +35,9 @@ parser.add_argument("--profile", action='store_true')
 args = parser.parse_args()
 
 if args.timit:
-  if args.save_step is None: args.save_step = 100
-  if args.train_step is None: args.train_step = 2000
-  if args.lr_decay_step is None: args.lr_decay_step = 300
+  if args.save_step is None: args.save_step = 1000
+  if args.train_step is None: args.train_step = 10000
+  if args.lr_decay_step is None: args.lr_decay_step = 1000
   # different phoneme size unit; require different TIMIT segmentation
   if args.eval_list is None: args.eval_list = "/data/hejung/timit/test_w2v.wav.phone"
 
@@ -136,12 +136,10 @@ opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
 import wav2vec2
 if args.timit:
-  m = wav2vec2.wav2vec2_phone(num_class=50, use_last=False, use_layers=3,
-    num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
+  m = wav2vec2.wav2vec2_phone(num_class=50, use_last=False, use_layers=3)
   is_ctc = False
 else:
-  m = wav2vec2.wav2vec2_phone(use_last=False, use_layers=12,
-    num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
+  m = wav2vec2.wav2vec2_phone(use_last=False, use_layers=12)
   is_ctc = True
 
 _in = np.zeros((args.batch_size, samp_len), dtype=np.float32)
@@ -293,7 +291,12 @@ if args.warm_start is not None:
 
   if args.ssl_rand is not None:
     def add_rand(e):
-      w, b = e.get_weights()
+      if len(e.get_weights()) == 2:
+        w, b = e.get_weights()
+      else:
+        assert len(e.get_weights()) == 1
+        w = e.get_weights()[0]
+        b = None
 
       w_flat = w.flatten()
       idxs = np.argsort(np.abs(w_flat))
@@ -308,7 +311,10 @@ if args.warm_start is not None:
       #w_rand = w_mask * w + (1 - w_mask) * w_rand
       w_rand = w_mask * w
 
-      e.set_weights([w_rand, b])
+      if b is not None:
+        e.set_weights([w_rand, b])
+      else:
+        e.set_weights([w_rand])
 
     for i, conv in enumerate(m.wav2vec2.wav2vec2.fe.conv_layers):
       add_rand(conv.conv)
