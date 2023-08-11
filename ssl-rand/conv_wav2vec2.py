@@ -68,6 +68,7 @@ for i, layer in enumerate(model.wav2vec2.wav2vec2.enc.layers):
   load_norm('{}.layer_norm'.format(prefix), layer.norm)
   load_norm('{}.final_layer_norm'.format(prefix), layer.out_norm)
 
+'''
 load_affine('project_hid', model.wav2vec2.project_hid)
 load_affine('project_q', model.wav2vec2.project_q)
 
@@ -76,6 +77,7 @@ w = m['quantizer.codevectors'].cpu().numpy()
 model.wav2vec2.quantizer.codevectors.assign(w)
 w = m['wav2vec2.masked_spec_embed'].cpu().numpy()
 model.wav2vec2.wav2vec2.masked_spec_embed.assign(w)
+'''
 
 ckpt = tf.train.Checkpoint(model)
 ckpt.write("wav2vec2.ckpt")

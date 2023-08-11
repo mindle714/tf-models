@@ -14,7 +14,6 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--tfrec", type=str, required=True) 
 parser.add_argument("--val-tfrec", type=str, required=False, default=None)
-parser.add_argument("--ssl-tfrec", type=str, required=False, default=None)
 parser.add_argument("--eval-list", type=str, required=False, default=None) 
 parser.add_argument("--batch-size", type=int, required=False, default=8) 
 parser.add_argument("--accum-step", type=int, required=False, default=2)
@@ -26,23 +25,7 @@ parser.add_argument("--begin-lr", type=float, required=False, default=2e-4)
 parser.add_argument("--lr-decay-rate", type=float, required=False, default=0.96)
 parser.add_argument("--lr-decay-step", type=float, required=False, default=None)
 parser.add_argument("--val-lr-update", type=float, required=False, default=3) 
-parser.add_argument("--ssl-weight", type=float, required=False, default=0)
-parser.add_argument("--ssl-decay", action='store_true')
-parser.add_argument("--ssl-decay-schedule", type=str, required=False,
-  choices=["linear", "exp", "cos", "stair", "inv-linear"], default="linear")
-parser.add_argument("--ssl-margin", type=float, required=False, default=0)
-parser.add_argument("--begin-ssl", type=int, required=False, default=0)
-parser.add_argument("--end-ssl", type=int, required=False, default=None)
-parser.add_argument("--period-ssl", type=int, required=False, default=None)
-parser.add_argument("--period-ssl-decay", type=float, required=False, default=1.0)
-parser.add_argument("--num-neg", type=int, required=False, default=100)
-parser.add_argument("--mask-prob", type=float, required=False, default=0.05)
-parser.add_argument("--mask-len", type=int, required=False, default=10)
-parser.add_argument("--ssl-from-ema", action='store_true')
-parser.add_argument("--ssl-ema-beta", type=float, required=False, default=0.9)
-parser.add_argument("--ssl-ema-update", type=int, required=False, default=1)
-parser.add_argument("--ewc", action='store_true')
-parser.add_argument("--ewc-lambda", type=float, required=False, default=0.01)
+parser.add_argument("--ssl-rand", type=float, required=False, default=None)
 parser.add_argument("--output", type=str, required=True) 
 parser.add_argument("--timit", action='store_true')
 parser.add_argument("--warm-start", type=str, required=False, default=None)
@@ -50,10 +33,6 @@ parser.add_argument("--stop-grad", action='store_true')
 parser.add_argument("--from-init", action='store_true')
 parser.add_argument("--profile", action='store_true')
 args = parser.parse_args()
-
-if args.ewc and args.ssl_from_ema:
-  import sys
-  sys.exit('--ewc and --ssl-from-ema cannot co-exist')
 
 if args.timit:
   if args.save_step is None: args.save_step = 100
@@ -83,52 +62,6 @@ for idx, pcm_ref in enumerate(evals):
   _pcm, _ = soundfile.read(_pcm)
   eval_pcms.append(_pcm)
 
-if args.end_ssl is None:
-  args.end_ssl = args.train_step
-
-if args.period_ssl is None:
-  args.period_ssl = args.train_step
-
-def cos_decay(step, decay_steps, init_lr, alpha=0.):
-  step = tf.math.minimum(step, decay_steps)
-  cosine_decay = 0.5 * (1 + tf.math.cos(np.pi * step / decay_steps))
-  decayed = (1 - alpha) * cosine_decay + alpha
-  return init_lr * decayed
-
-def exp_decay(step, decay_steps, init_lr, end_lr=0.01):
-  if step > decay_steps: return 0.
-  if init_lr <= 0.: return 0.
-  decay_rate = end_lr / init_lr
-  return init_lr * decay_rate ** (step / decay_steps)
-
-def linear_decay(step, decay_steps, init_lr, end_lr = 0.):
-  if step > decay_steps: return end_lr
-  return ((end_lr - init_lr) / decay_steps) * step + init_lr
-
-# TODO add optional multiplier
-def inv_linear_decay(step, decay_steps, init_lr):
-  end_lr = 2 * init_lr
-  if step > decay_steps: return end_lr
-  return ((end_lr - init_lr) / decay_steps) * step + init_lr
-
-def stair_decay(step, decay_steps, init_lr, end_lr = 0., decay_unit = 100):
-  if step > decay_steps: return end_lr
-  _step = (step // decay_unit) * decay_unit
-  return ((end_lr - init_lr) / decay_steps) * _step + init_lr
-
-if args.ssl_decay_schedule == "linear":
-  factor_decay = linear_decay
-elif args.ssl_decay_schedule == "exp":
-  factor_decay = exp_decay
-elif args.ssl_decay_schedule == "cos":
-  factor_decay = cos_decay
-elif args.ssl_decay_schedule == "stair":
-  factor_decay = stair_decay
-elif args.ssl_decay_schedule == "inv-linear":
-  factor_decay = inv_linear_decay
-else:
-  assert False, "unknown type {}".format(args.ssl_decay_schedule)
-
 import sys
 import json
 tfrec_args = os.path.join(args.tfrec, "ARGS")
@@ -147,13 +80,6 @@ if args.val_tfrec is not None:
     val_spec_len = int((val_samp_len - 400 + 400) / 160) + 1 
   if val_samp_len != samp_len:
     sys.exit('validation data has sample length {}'.format(val_samp_len))
-
-if args.ssl_tfrec is not None:
-  ssl_tfrec_args = os.path.join(args.ssl_tfrec, "ARGS")
-  with open(ssl_tfrec_args, "r") as f:
-    _json = json.loads(f.readlines()[-1])
-    ssl_samp_len = _json["samp_len"]
-    ssl_spec_len = int((ssl_samp_len - 400 + 400) / 160) + 1 
 
 import types
 from stat import S_IREAD, S_IRGRP, S_IROTH, S_IWUSR
@@ -205,52 +131,26 @@ if args.val_tfrec is not None:
   val_dataset = parse_data_w2v.gen_val(val_tfrec_list, val_samp_len,
     batch_size=args.batch_size, seed=seed)
 
-ssl_dataset = None
-if args.ssl_tfrec is not None:
-  ssl_tfrec_list = glob.glob(os.path.join(args.ssl_tfrec, "train-*.tfrecord"))
-  ssl_dataset = parse_data_w2v.gen_train(ssl_tfrec_list, ssl_samp_len, None,
-    batch_size=args.batch_size, seed=seed)
-
 lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
-
-if args.ewc:
-  import ewc_w2v
 
 import wav2vec2
 if args.timit:
   m = wav2vec2.wav2vec2_phone(num_class=50, use_last=False, use_layers=3,
     num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
-  m_ema = wav2vec2.wav2vec2_phone(num_class=50, use_last=False, use_layers=3,
-    num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
   is_ctc = False
-  if args.ewc:
-    m_ewc = wav2vec2.wav2vec2_phone(num_class=50, use_last=False, use_layers=3,
-      num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
 else:
   m = wav2vec2.wav2vec2_phone(use_last=False, use_layers=12,
     num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
-  m_ema = wav2vec2.wav2vec2_phone(use_last=False, use_layers=12,
-    num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
   is_ctc = True
-  if args.ewc:
-    m_ewc = wav2vec2.wav2vec2_phone(use_last=False, use_layers=12,
-      num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
 
 _in = np.zeros((args.batch_size, samp_len), dtype=np.float32)
 _ref = np.zeros((args.batch_size, txt_len), dtype=np.int32)
 _in_len = np.ones((args.batch_size, 1), dtype=np.int32) * samp_len
 _ref_len = np.ones((args.batch_size, 1), dtype=np.int32) * txt_len
 
-# in EWC, gradients on quantizers should be generated
-do_ssl_loss = (not (args.ssl_weight == 0)) or args.ewc
 _ = m((_in, _ref, _in_len, _ref_len),
-  training = True, ssl_loss = do_ssl_loss, ctc = True)
-_ = m_ema((_in, _ref, _in_len, _ref_len),
-  training = True, ssl_loss = do_ssl_loss, ctc = True)
-if args.ewc:
-  _ = m_ewc((_in, _ref, _in_len, _ref_len),
-    training = True, ssl_loss = do_ssl_loss, ctc = True)
+  training = True, ctc = True)
 
 accum_grads = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights]
 
@@ -271,74 +171,23 @@ if args.profile:
   tf.profiler.experimental.start(logdir)
 
 @tf.function
-def run_step(step, pcm, ssl_pcm, txt,
-             samp_len, ssl_samp_len, txt_len,
+def run_step(step, pcm, txt,
+             samp_len, txt_len,
              training=True, accum=False,
-             stop_grad=False, update_ema=False):
-  ssl_weight = 0.
-  ssl_step = step % args.period_ssl
-  num_period = step // args.period_ssl
+             stop_grad=False):
+  with tf.GradientTape(persistent=True) as tape, log_writer.as_default():
+    loss = m(
+      (pcm, txt, samp_len, txt_len),
+      training = training, 
+      stop_grad = stop_grad,
+      ctc = is_ctc)
 
-  if ssl_step >= args.begin_ssl and ssl_step < args.end_ssl:
-    _ssl_weight = args.ssl_weight * (args.period_ssl_decay ** tf.cast(num_period, tf.float32))
-
-    if args.ssl_decay:
-      ssl_weight = factor_decay(tf.cast(ssl_step, tf.float32),
-        args.end_ssl - args.begin_ssl, _ssl_weight)
-    else:
-      ssl_weight = _ssl_weight
-
-  tf.summary.scalar("ssl_weight", ssl_weight, step=step)
-
-  if args.ssl_from_ema:
-    mask_label, neg_indices, ema_x_feat = m_ema(
-      (ssl_pcm, ssl_samp_len), training = training, ssl_only=True)
-
-    with tf.GradientTape(persistent=True) as tape, log_writer.as_default():
-      loss, sloss = m(
-        (pcm, ssl_pcm, txt, samp_len, ssl_samp_len, txt_len,
-          mask_label, neg_indices, ema_x_feat),
-        training = training, 
-        ssl_loss = (not (args.ssl_weight == 0)),
-        stop_grad = stop_grad,
-        ctc = is_ctc)
-
-      loss = tf.math.reduce_mean(loss)
-      tf.summary.scalar("loss", loss, step=step)
-      sloss = tf.where(sloss > args.ssl_margin, sloss, tf.zeros_like(sloss))
-      sloss = tf.math.reduce_mean(sloss)
-      tf.summary.scalar("sloss", sloss, step=step)
-
-      sloss = ssl_weight * sloss
-      total_loss = loss + sloss
-
-  else:
-    with tf.GradientTape(persistent=True) as tape, log_writer.as_default():
-      loss, sloss = m(
-        (pcm, ssl_pcm, txt, samp_len, ssl_samp_len, txt_len),
-        training = training, 
-        ssl_loss = (not (args.ssl_weight == 0)),
-        stop_grad = stop_grad,
-        ctc = is_ctc)
-
-      loss = tf.math.reduce_mean(loss)
-      tf.summary.scalar("loss", loss, step=step)
-      sloss = tf.where(sloss > args.ssl_margin, sloss, tf.zeros_like(sloss))
-      sloss = tf.math.reduce_mean(sloss)
-      tf.summary.scalar("sloss", sloss, step=step)
-
-      sloss = ssl_weight * sloss
-      total_loss = loss + sloss
-
-      if args.ewc:
-        ewc_loss = ewc_w2v.ewc_loss(args.ewc_lambda, m, 
-          m_ewc.trainable_weights, (ssl_pcm, ssl_samp_len))
-        sloss = ewc_loss(m)
-        total_loss += sloss
+    loss = tf.math.reduce_mean(loss)
+    tf.summary.scalar("loss", loss, step=step)
 
   if training:
     weights = m.trainable_weights
-    grads = tape.gradient(total_loss, weights)
+    grads = tape.gradient(loss, weights)
     grads, _ = tf.clip_by_global_norm(grads, 5.)
             
     if args.accum_step == 1:
@@ -355,17 +204,12 @@ def run_step(step, pcm, ssl_pcm, txt,
           accum_grads[idx].assign(accum_grads[idx]/args.accum_step)
 
         opt.apply_gradients(zip(accum_grads, weights))
-
-        if update_ema:
-          for w, w_ema in zip(m.trainable_weights, m_ema.trainable_weights):
-            delta = (1. - args.ssl_ema_beta) * (w - w_ema)
-            w_ema.assign_add(delta)
                 
         for idx, grad in enumerate(grads):
           if grad is None: continue
           accum_grads[idx].assign(tf.zeros_like(grad))
 
-  return loss, sloss, ssl_weight
+  return loss
 
 def run_eval_step(pcm, pcm_len):
   if not args.timit:
@@ -413,9 +257,6 @@ fh = logging.FileHandler(logfile)
 logger.addHandler(fh)
 
 ckpt = tf.train.Checkpoint(m)
-ema_ckpt = tf.train.Checkpoint(m_ema)
-if args.ewc:
-  ewc_ckpt = tf.train.Checkpoint(m_ewc)
 prev_val_loss = None; stall_cnt = 0
 
 init_epoch = 0
@@ -438,17 +279,7 @@ if args.warm_start is not None:
       opt_weight = np.load(opt_weight, allow_pickle=True)
       opt_cfg = np.load(opt_cfg, allow_pickle=True).flatten()[0] 
 
-  if args.ssl_weight == 0:
-    # ignore projections used for pretraining
-    ckpt.read(args.warm_start).expect_partial()
-    ema_ckpt.read(args.warm_start).expect_partial()
-    if args.ewc:
-      ewc_ckpt.read(args.warm_start).expect_partial()
-  else:
-    ckpt.read(args.warm_start).assert_consumed()
-    ema_ckpt.read(args.warm_start).assert_consumed()
-    if args.ewc:
-      ewc_ckpt.read(args.warm_start).assert_consumed()
+  ckpt.read(args.warm_start).assert_consumed()
 
   if not args.from_init:
     if isinstance(opt_weight, np.ndarray):
@@ -460,34 +291,61 @@ if args.warm_start is not None:
       opt.apply_gradients(zip(zero_grads, grad_vars))
       opt.set_weights(opt_weight)
 
-_traced_begin = 2; _traced_cnt = 10
-if ssl_dataset is None:
-  ssl_dataset = iter(lambda: None, 0)
+  if args.ssl_rand is not None:
+    def add_rand(e):
+      w, b = e.get_weights()
 
-for idx, (data, ssl_data) in enumerate(zip(dataset, ssl_dataset)):
+      w_flat = w.flatten()
+      idxs = np.argsort(np.abs(w_flat))
+      idxs = idxs[:int(idxs.shape[0] * args.ssl_rand)]
+
+      w_mask = np.ones_like(w_flat)
+      w_mask[idxs] = 0
+      w_mask = w_mask.reshape(w.shape)
+
+      init = tf.keras.initializers.GlorotUniform(seed = seed)
+      w_rand = init(shape = w.shape)
+      #w_rand = w_mask * w + (1 - w_mask) * w_rand
+      w_rand = w_mask * w
+
+      e.set_weights([w_rand, b])
+
+    for i, conv in enumerate(m.wav2vec2.wav2vec2.fe.conv_layers):
+      add_rand(conv.conv)
+      # TODO lnorm
+      
+    # TODO lnorm
+    add_rand(m.wav2vec2.wav2vec2.fp.proj)
+    add_rand(m.wav2vec2.wav2vec2.enc.emb.conv)
+    # TODO lnorm
+
+    for i, layer in enumerate(m.wav2vec2.wav2vec2.enc.layers):
+      add_rand(layer.atten.q_proj)
+      add_rand(layer.atten.k_proj)
+      add_rand(layer.atten.v_proj)
+      add_rand(layer.atten.out_proj)
+
+      add_rand(layer.feed.in_dense)
+      add_rand(layer.feed.out_dense)
+      # TODO lnorm
+
+_traced_begin = 2; _traced_cnt = 10
+
+for idx, data in enumerate(dataset):
   idx += init_epoch
   if idx > args.train_step: break
             
   # TODO not using (idx+1) to call apply_grads in initial run_step()
   accum = not (idx % args.accum_step == 0)
-  update_ema = (idx % args.ssl_ema_update == 0)
-
-  if ssl_data is not None:
-    ssl_pcm = ssl_data["pcm"]
-    ssl_pcm_len = ssl_data["pcm_len"]
-
-  else:
-    ssl_pcm = data["pcm"]
-    ssl_pcm_len = data["pcm_len"]
 
   if args.profile:
     if idx > (init_epoch + _traced_begin) and _traced_cnt > 0:
       with tf.profiler.experimental.Trace('train', step_num=idx, _r=1):
-        loss, sloss, sw = run_step(
+        loss = run_step(
           tf.cast(idx, tf.int64),
-          data["pcm"], ssl_pcm, data["txt"], 
-          data["pcm_len"], ssl_pcm_len, data["txt_len"],
-          accum=accum, update_ema=update_ema, stop_grad=args.stop_grad)
+          data["pcm"], data["txt"], 
+          data["pcm_len"], data["txt_len"],
+          accum=accum, stop_grad=args.stop_grad)
       _traced_cnt -= 1
 
     elif idx > (init_epoch + _traced_begin) and  _traced_cnt == 0:
@@ -495,25 +353,25 @@ for idx, (data, ssl_data) in enumerate(zip(dataset, ssl_dataset)):
       _traced_cnt -= 1
 
     else:
-        loss, sloss, sw = run_step(
+        loss = run_step(
           tf.cast(idx, tf.int64),
-          data["pcm"], ssl_pcm, data["txt"], 
-          data["pcm_len"], ssl_pcm_len, data["txt_len"],
-          accum=accum, update_ema=update_ema, stop_grad=args.stop_grad)
+          data["pcm"], data["txt"], 
+          data["pcm_len"], data["txt_len"],
+          accum=accum, stop_grad=args.stop_grad)
 
   else:
-    loss, sloss, sw = run_step(
+    loss = run_step(
       tf.cast(idx, tf.int64),
-      data["pcm"], ssl_pcm, data["txt"], 
-      data["pcm_len"], ssl_pcm_len, data["txt_len"],
-      accum=accum, update_ema=update_ema, stop_grad=args.stop_grad)
+      data["pcm"], data["txt"], 
+      data["pcm_len"], data["txt_len"],
+      accum=accum, stop_grad=args.stop_grad)
 
   log_writer.flush()
   tf.summary.scalar("lr", lr, step=idx)
 
   if idx > init_epoch and idx % args.eval_step == 0:
-    logger.info("gstep[{}] loss[{:.2f}] sloss[{:.2f}] lr[{:.2e}] sr[{:.2e}]".format(
-      idx, loss, sloss, lr.numpy(), sw))
+    logger.info("gstep[{}] loss[{:.2f}] lr[{:.2e}]".format(
+      idx, loss, lr.numpy()))
 
   if val_dataset is None:
     if args.accum_step == 1 or not accum:
