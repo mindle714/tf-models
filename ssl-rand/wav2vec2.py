@@ -274,6 +274,7 @@ class wav2vec2_phone(tf.keras.layers.Layer):
   def __init__(self, 
                num_enc_layer=12, num_class=74, 
                use_last=False, use_layers=12,
+               single_output=False,
                *args, **kwargs):
     super(wav2vec2_phone, self).__init__(*args, **kwargs)
     
@@ -281,6 +282,7 @@ class wav2vec2_phone(tf.keras.layers.Layer):
     self.num_class = num_class
     self.use_last = use_last
     self.use_layers = use_layers
+    self.single_output = single_output
 
   def build(self, input_shape):
     conv_opt = dict(padding='same', use_bias=False)
@@ -320,6 +322,10 @@ class wav2vec2_phone(tf.keras.layers.Layer):
     x = gelu(x)
     
     x = self.proj(x)
+
+    if self.single_output:
+      x = tf.math.reduce_mean(x, axis=1, keepdims=True)
+
     # TODO in s3prl, no activation between two linear layers
     x = self.linear(x)
 
@@ -336,6 +342,8 @@ class wav2vec2_phone(tf.keras.layers.Layer):
       else:
         ce_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
           tf.cast(ref, tf.int32), x)
+        if self.single_output:
+          return tf.math.reduce_mean(ce_loss)
 
         _ref_len = tf.squeeze(ref_len, -1)
         ce_mask = tf.sequence_mask(_ref_len, tf.shape(x)[1])
