@@ -8,6 +8,7 @@ parser.add_argument("--samp-len", type=int, required=False, default=272000)
 parser.add_argument("--text-len", type=int, required=False, default=None)
 parser.add_argument("--no-spec", action='store_true')
 parser.add_argument("--norm", action='store_true')
+parser.add_argument("--crop-middle", action='store_true')
 parser.add_argument("--output", type=str, required=True) 
 args = parser.parse_args()
 
@@ -90,7 +91,13 @@ import tqdm
 import parse_data
 
 def get_feats(pcm, txt): 
-  if pcm.shape[0] > args.samp_len: return None
+  if pcm.shape[0] > args.samp_len:
+    if not args.crop_middle: return None
+    else:
+      _pad = pcm.shape[0] - args.samp_len
+      _pad = _pad // 2
+      pcm = pcm[_pad:_pad+args.samp_len]
+      assert pcm.shape[0] == args.samp_len
 
   def pad(_in, _len, val):
     return np.concatenate([_in,
