@@ -28,11 +28,16 @@ parser.add_argument("--val-lr-update", type=float, required=False, default=3)
 parser.add_argument("--ssl-rand", type=float, required=False, default=None)
 parser.add_argument("--output", type=str, required=True) 
 parser.add_argument("--timit", action='store_true')
+parser.add_argument("--speech-command", action='store_true')
 parser.add_argument("--warm-start", type=str, required=False, default=None)
 parser.add_argument("--stop-grad", action='store_true')
 parser.add_argument("--from-init", action='store_true')
 parser.add_argument("--profile", action='store_true')
 args = parser.parse_args()
+
+if args.timit and args.speech_command:
+  import sys
+  sys.exit("--timit and --speech-command cannot coincide")
 
 if args.timit:
   if args.save_step is None: args.save_step = 100
@@ -40,6 +45,12 @@ if args.timit:
   if args.lr_decay_step is None: args.lr_decay_step = 1000
   # different phoneme size unit; require different TIMIT segmentation
   if args.eval_list is None: args.eval_list = "/data/hejung/timit/test.wav.phone"
+
+elif args.speech_command:
+  if args.save_step is None: args.save_step = 100
+  if args.train_step is None: args.train_step = 8000
+  if args.lr_decay_step is None: args.lr_decay_step = 1000
+  if args.eval_list is None: args.eval_list = "/data/hejung/speech-commands/test.v1.wav.key"
 
 else:
   if args.save_step is None: args.save_step = 3000
@@ -138,6 +149,9 @@ import tera
 if args.timit:
   m = tera.tera_phone(num_class=50, use_last=True)
   is_ctc = False
+elif args.speech_command:
+  m = tera.tera_phone(num_class=10, use_last=True, single_output=True)
+  is_ctc = False
 else:
   m = tera.tera_phone(use_last=False)
   is_ctc = True
@@ -229,7 +243,7 @@ def run_eval_step(pcm, pcm_len):
 
   maxids = np.argmax(np.squeeze(_hyp, 0), -1)
 
-  if args.timit:
+  if args.timit or args.speech_command:
     return [str(e) for e in maxids]
 
   def greedy(hyp):
@@ -406,7 +420,7 @@ for idx, data in enumerate(dataset):
         _ref = [int(e) for e in pcm_ref.split()[1:]]
         hyp = run_eval_step(_pcm, _pcm_len)
 
-        if args.timit:
+        if args.timit or args.speech_command:
           _per = metric.per([" ".join(hyp)], [" ".join([str(e) for e in _ref])])
         else:
           _per = metric.per([hyp], [tokenizer.decode(_ref)])
