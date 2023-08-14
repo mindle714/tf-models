@@ -61,8 +61,8 @@ elif args.voxceleb:
   if args.eval_list is None: args.eval_list = "/data/hejung/vox1/test.wav.key"
 
 else:
-  if args.save_step is None: args.save_step = 10000
-  if args.train_step is None: args.train_step = 45000
+  if args.save_step is None: args.save_step = 3000
+  if args.train_step is None: args.train_step = 30000
   if args.lr_decay_step is None: args.lr_decay_step = 4000
   if args.eval_list is None: args.eval_list = "/data/hejung/librispeech/test-clean.flac.phone"
   
