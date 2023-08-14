@@ -48,7 +48,7 @@ if args.timit:
 
 elif args.speech_command:
   if args.save_step is None: args.save_step = 100
-  if args.train_step is None: args.train_step = 4000
+  if args.train_step is None: args.train_step = 8000
   if args.lr_decay_step is None: args.lr_decay_step = 1000
   if args.eval_list is None: args.eval_list = "/data/hejung/speech-commands/test.v1.wav.key"
 
@@ -420,7 +420,7 @@ for idx, data in enumerate(dataset):
         _ref = [int(e) for e in pcm_ref.split()[1:]]
         hyp = run_eval_step(_pcm, _pcm_len)
 
-        if args.timit:
+        if args.timit or args.speech_command:
           _per = metric.per([" ".join(hyp)], [" ".join([str(e) for e in _ref])])
         else:
           _per = metric.per([hyp], [tokenizer.decode(_ref)])
