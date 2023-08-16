@@ -231,7 +231,7 @@ def run_step(step, spec, txt,
   return loss
 
 def run_eval_step(pcm, pcm_len):
-  if not args.timit:
+  if not (args.timit or args.speech_command or args.voxceleb):
     # sample_len-wise inference
     hyps = []
     for idx in range(int(np.ceil(pcm_len / samp_len))):

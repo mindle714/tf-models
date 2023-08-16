@@ -31,9 +31,16 @@ epoch = os.path.basename(args.ckpt).replace(".", "-").split("-")[1]
 
 traincmd = open(os.path.join(expdir, "ARGS"), "r").readlines()[0].strip()
 timit = ("--timit" in traincmd)
+speech_command = ("--speech-command" in traincmd)
+voxceleb = ("--voxceleb" in traincmd)
+# none of these options coincide; checked in train.py
 
 if timit:
   args.eval_list = "/data/hejung/timit/test.wav.phone"
+elif speech_command:
+  args.eval_list = "/data/hejung/speech-commands/test.v1.wav.key"
+elif voxceleb:
+  args.eval_list = "/data/hejung/vox1/test.wav.key"
 else:
   args.eval_list = "/data/hejung/librispeech/test-clean.flac.phone"
 
@@ -44,9 +51,13 @@ if os.path.exists(join(expdir, "tera.py")):
   if os.path.dirname(tera.__file__) != expdir:
     sys.exit("tera is loaded from {}".format(tera.__file__))
   if timit:
-    m = tera.tera_phone(num_class=50)
+    m = tera.tera_phone(num_class=50, use_last=True)
+  elif speech_command:
+    m = tera.tera_phone(num_class=10, use_last=True, single_output=True)
+  elif voxceleb:
+    m = tera.tera_phone(num_class=1251, use_last=True, single_output=True)
   else:
-    m = tera.tera_phone()
+    m = tera.tera_phone(use_last=False)
   is_tera = True
 
 elif os.path.exists(join(expdir, "wav2vec2.py")):
@@ -54,7 +65,11 @@ elif os.path.exists(join(expdir, "wav2vec2.py")):
   if os.path.dirname(wav2vec2.__file__) != expdir:
     sys.exit("wav2vec2 is loaded from {}".format(wav2vec2.__file__))
   if timit:
-    m = wav2vec2.wav2vec2_phone(num_class=50)
+    m = wav2vec2.wav2vec2_phone(num_class=50, use_last=False, use_layers=3)
+  elif speech_command:
+    m = wav2vec2.wav2vec2_phone(num_class=10, use_last=False, use_layers=3, single_output=True)
+  elif voxceleb:
+    m = wav2vec2.wav2vec2_phone(num_class=1251, use_last=False, use_layers=3, single_output=True)
   else:
     m = wav2vec2.wav2vec2_phone()
   is_tera = False
@@ -63,16 +78,27 @@ else:
   assert False, "Invalid experiment path {}".format(expdir)
 
 import numpy as np
+import json
+
+exp_args = os.path.join(expdir, "ARGS")
+with open(exp_args, "r") as f:
+  _json = json.loads(f.readlines()[-1])
+  tfrec_path = _json["tfrec"]
+  tfrec_args = os.path.join(tfrec_path, "ARGS")
+
 if is_tera:
-  if timit:
-    _in = np.zeros((1, 801, 80), dtype=np.float32)
-  else:
-    _in = np.zeros((1, 1701, 80), dtype=np.float32)
+  with open(tfrec_args, "r") as f:
+    _json = json.loads(f.readlines()[-1])
+    samp_len = _json["samp_len"]
+    spec_len = int((samp_len - 400 + 400) / 160) + 1
+  _in = np.zeros((1, spec_len, 80), dtype=np.float32)
+
 else:
-  if timit:
-    _in = np.zeros((1, 128000), dtype=np.float32)
-  else:
-    _in = np.zeros((1, 272000), dtype=np.float32)
+  with open(tfrec_args, "r") as f:
+    _json = json.loads(f.readlines()[-1])
+    samp_len = _json["samp_len"]
+  _in = np.zeros((1, samp_len), dtype=np.float32)
+
 _ = m(_in, training=False)
 
 ckpt = tf.train.Checkpoint(m)
@@ -124,7 +150,7 @@ def eval(_pcm, chunk_len):
 
   hyp = np.concatenate(hyps, 1)
 
-  if timit:
+  if timit or speech_command or voxceleb:
     return [str(e) for e in np.argmax(np.squeeze(hyp, 0), -1)]
 
   def greedy(hyp):
@@ -181,7 +207,7 @@ resname = "{}-{}".format(expname, epoch)
 evals = [e.strip() for e in open(args.eval_list, "r").readlines()]
 pers = []
 
-if timit:
+if timit or speech_command or voxceleb:
   with open(join("results", "{}.eval".format(resname)), "w") as f:
     for idx, pcm_ref in enumerate(evals):
       _pcm = pcm_ref.split()[0]
