@@ -26,6 +26,7 @@ parser.add_argument("--lr-decay-rate", type=float, required=False, default=0.96)
 parser.add_argument("--lr-decay-step", type=float, required=False, default=None)
 parser.add_argument("--val-lr-update", type=float, required=False, default=3) 
 parser.add_argument("--ssl-rand", type=float, required=False, default=None)
+parser.add_argument("--ssl-fix-step", type=int, required=False, default=0)
 parser.add_argument("--output", type=str, required=True) 
 parser.add_argument("--timit", action='store_true')
 parser.add_argument("--speech-command", action='store_true')
@@ -209,24 +210,23 @@ def run_step(step, spec, txt,
     grads = tape.gradient(loss, weights)
     grads, _ = tf.clip_by_global_norm(grads, 5.)
             
-    if args.accum_step == 1:
-      opt.apply_gradients(zip(grads, weights))
-            
-    else:
-      for idx, grad in enumerate(grads):
-        if grad is None: continue
+    for idx, grad in enumerate(grads):
+      if grad is None: continue
+      if step < args.ssl_fix_step:
+        accum_grads[idx].assign_add(grad * grad_mask[idx])
+      else:
         accum_grads[idx].assign_add(grad)
 
-      if not accum:
-        for idx, grad in enumerate(grads):
-          if grad is None: continue
-          accum_grads[idx].assign(accum_grads[idx]/args.accum_step)
+    if not accum:
+      for idx, grad in enumerate(grads):
+        if grad is None: continue
+        accum_grads[idx].assign(accum_grads[idx]/args.accum_step)
 
-        opt.apply_gradients(zip(accum_grads, weights))
+      opt.apply_gradients(zip(accum_grads, weights))
                 
-        for idx, grad in enumerate(grads):
-          if grad is None: continue
-          accum_grads[idx].assign(tf.zeros_like(grad))
+      for idx, grad in enumerate(grads):
+        if grad is None: continue
+        accum_grads[idx].assign(tf.zeros_like(grad))
 
   return loss
 
@@ -315,23 +315,29 @@ if args.warm_start is not None:
       opt.set_weights(opt_weight)
 
   if args.ssl_rand is not None:
+    grad_mask_dict = {e.name:tf.ones_like(e) for e in m.trainable_weights}
+
     def add_rand(e):
       w, b = e.get_weights()
 
       w_flat = w.flatten()
       idxs = np.argsort(np.abs(w_flat))
-      idxs = idxs[:int(idxs.shape[0] * args.ssl_rand)]
+      idxs_mask = idxs[:int(idxs.shape[0] * args.ssl_rand)]
+      idxs_mask_inv = idxs[int(idxs.shape[0] * args.ssl_rand):]
 
       w_mask = np.ones_like(w_flat)
-      w_mask[idxs] = 0
+      w_mask[idxs_mask] = 0
       w_mask = w_mask.reshape(w.shape)
 
       init = tf.keras.initializers.GlorotUniform(seed = seed)
       w_rand = init(shape = w.shape)
-      #w_rand = w_mask * w + (1 - w_mask) * w_rand
-      w_rand = w_mask * w
+      #w_rand = np.ones_like(w) * np.mean(w_flat[idxs_mask_inv])
+      w_rand = w_mask * w #+ (1 - w_mask) * w_rand
 
       e.set_weights([w_rand, b])
+
+      w_name = e.trainable_weights[0].name
+      grad_mask_dict[w_name] *= (1 - w_mask)
 
     add_rand(m.tera.tera.fe.spec_transform)
     # TODO what about layer norm weights?
@@ -347,6 +353,12 @@ if args.warm_start is not None:
       add_rand(m.tera.tera.enc.layers[i].inter)
       add_rand(m.tera.tera.enc.layers[i].out)
       # TODO lnorm
+
+    grad_mask = [tf.ones_like(e) for e in m.trainable_weights]
+    for idx, w in enumerate(grad_mask):
+      w_name = m.trainable_weights[idx].name
+      if w_name in grad_mask_dict:
+        grad_mask[idx] = grad_mask_dict[w_name]
 
 _traced_begin = 2; _traced_cnt = 10
 
