@@ -229,7 +229,9 @@ def stft_loss(x, ref, frame_length, frame_step, fft_length):
 
 class tera_phone(tf.keras.layers.Layer):
   def __init__(self, num_class=74, use_last=False,
-               single_output=False, *args, **kwargs):
+               single_output=False,
+               proj_dim=256,
+               *args, **kwargs):
     super(tera_phone, self).__init__(*args, **kwargs)
 
     self.n_fft = 400
@@ -237,13 +239,14 @@ class tera_phone(tf.keras.layers.Layer):
     self.num_class = num_class
     self.use_last = use_last
     self.single_output = single_output
+    self.proj_dim = proj_dim
 
   def build(self, input_shape):
     conv_opt = dict(padding='same', use_bias=False)
 
     self.tera = tera_seq(self.n_fft, self.hop_len)
 
-    self.proj = tf.keras.layers.Dense(256, use_bias=True)
+    self.proj = tf.keras.layers.Dense(self.proj_dim, use_bias=True)
     self.linear = tf.keras.layers.Dense(self.num_class, use_bias=True)
   
   def call(self, inputs, training=None, 
@@ -297,7 +300,14 @@ class tera_phone(tf.keras.layers.Layer):
     x = self.proj(x)
 
     if self.single_output:
-      x = tf.math.reduce_mean(x, axis=1, keepdims=True)
+      if x_len is not None:
+        attn_mask = tf.sequence_mask(tf.squeeze(x_len, -1), tf.shape(x)[1])
+        attn_mask = tf.cast(attn_mask, dtype=x.dtype)
+        x_sum = tf.math.reduce_sum(tf_expd(attn_mask, -1) * x, axis=1, keepdims=True)
+        x = x_sum / tf_expd(tf.cast(x_len, tf.float32), -1)
+
+      else:
+        x = tf.math.reduce_mean(x, axis=1, keepdims=True)
 
     # TODO in s3prl, no activation between two linear layers
     x = self.linear(x)
