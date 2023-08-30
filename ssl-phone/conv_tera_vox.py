@@ -10,7 +10,7 @@ assert "optimizers" not in sys.modules
 sys.modules["optimizers"] = s3prl.optimizers
 m = torch.load("/home/hejung/tera_960hr/states-1000000.ckpt", map_location=torch.device('cpu'))
 
-model = tera_phone(num_class=1251, use_last=True, single_output=True, proj_dim=1024)
+model = tera_phone(num_class=1251, use_last=True, single_output=True)
 
 import numpy as np
 spec = np.zeros(801*80)

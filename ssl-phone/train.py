@@ -242,11 +242,11 @@ elif args.speech_command:
   if args.ewc:
     m_ewc = tera.tera_phone(num_class=10, use_last=True, single_output=True)
 elif args.voxceleb:
-  m = tera.tera_phone(num_class=1251, use_last=True, single_output=True, proj_dim=1024)
-  m_ema = tera.tera_phone(num_class=1251, use_last=True, single_output=True, proj_dim=1024)
+  m = tera.tera_phone(num_class=1251, use_last=True, single_output=True)
+  m_ema = tera.tera_phone(num_class=1251, use_last=True, single_output=True)
   is_ctc = False
   if args.ewc:
-    m_ewc = tera.tera_phone(num_class=1251, use_last=True, single_output=True, proj_dim=1024)
+    m_ewc = tera.tera_phone(num_class=1251, use_last=True, single_output=True)
 else:
   m = tera.tera_phone(use_last=False)
   m_ema = tera.tera_phone(use_last=False)

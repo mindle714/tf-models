@@ -8,6 +8,8 @@ parser.add_argument("--samp-len", type=int, required=False, default=272000)
 parser.add_argument("--text-len", type=int, required=False, default=None)
 parser.add_argument("--no-spec", action='store_true')
 parser.add_argument("--norm", action='store_true')
+parser.add_argument("--div-by-len", action='store_true')
+parser.add_argument("--crop-middle", action='store_true')
 parser.add_argument("--output", type=str, required=True) 
 args = parser.parse_args()
 
@@ -90,7 +92,13 @@ import tqdm
 import parse_data
 
 def get_feats(pcm, txt): 
-  if pcm.shape[0] > args.samp_len: return None
+  if pcm.shape[0] > args.samp_len:
+    if not args.crop_middle: return None
+    else:
+      _pad = pcm.shape[0] - args.samp_len
+      _pad = _pad // 2
+      pcm = pcm[_pad:_pad+args.samp_len]
+      assert pcm.shape[0] == args.samp_len
 
   def pad(_in, _len, val):
     return np.concatenate([_in,
@@ -174,6 +182,25 @@ for bidx in tqdm.tqdm(range(len(train_list)//num_process+1)):
       pcm, txt = parse(e)
       pcms.append(pcm)
       txts.append(txt)
+
+  if args.div_by_len:
+    _pcms = []; _txts = []
+    for pcm, txt in zip(pcms, txts):
+      if (pcm.shape[0] // args.samp_len) == 0:
+        _pcms.append(pcm)
+        _txts.append(txt)
+        continue
+
+      for idx in range(pcm.shape[0] // args.samp_len - 1):
+        _pcm = pcm[idx * args.samp_len : (idx+1) * args.samp_len]
+        _pcms.append(_pcm)
+        _txts.append(txt)
+
+      idx = pcm.shape[0] // args.samp_len - 1
+      _pcms.append(pcm[idx * args.samp_len : ])
+      _txts.append(txt)
+
+    pcms = _pcms; txts = _txts
 
   if num_process > 1:
     with multiprocessing.Pool(num_process) as pool:
