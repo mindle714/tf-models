@@ -293,11 +293,6 @@ class tera_phone(tf.keras.layers.Layer):
       x = xs[-1]
     else:
       x = sum(xs)
-    
-    if stop_grad:
-      x = tf.stop_gradient(x)
-
-    x = self.proj(x)
 
     if self.single_output:
       if x_len is not None:
@@ -308,6 +303,11 @@ class tera_phone(tf.keras.layers.Layer):
 
       else:
         x = tf.math.reduce_mean(x, axis=1, keepdims=True)
+    
+    if stop_grad:
+      x = tf.stop_gradient(x)
+
+    x = self.proj(x)
 
     # TODO in s3prl, no activation between two linear layers
     x = self.linear(x)

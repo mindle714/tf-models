@@ -31,9 +31,16 @@ epoch = os.path.basename(args.ckpt).replace(".", "-").split("-")[1]
 
 traincmd = open(os.path.join(expdir, "ARGS"), "r").readlines()[0].strip()
 timit = ("--timit" in traincmd)
+speech_command = ("--speech-command" in traincmd)
+voxceleb = ("--voxceleb" in traincmd)
+# none of these options coincide; checked in train.py
 
 if timit:
   args.eval_list = "/data/hejung/timit/test.wav.phone"
+elif speech_command:
+  args.eval_list = "/data/hejung/speech-commands/test.v1.wav.key"
+elif voxceleb:
+  args.eval_list = "/data/hejung/vox1/test.wav.key"
 else:
   args.eval_list = "/data/hejung/librispeech/test-clean.flac.phone"
 
