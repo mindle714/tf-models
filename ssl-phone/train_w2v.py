@@ -256,15 +256,15 @@ elif args.speech_command:
 elif args.voxceleb:
   m = wav2vec2.wav2vec2_phone(num_class=1251, use_last=False, use_layers=3,
     num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len,
-    single_output=True)
+    single_output=True, norm_wav=True)
   m_ema = wav2vec2.wav2vec2_phone(num_class=1251, use_last=False, use_layers=3,
     num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len,
-    single_output=True)
+    single_output=True, norm_wav=True)
   is_ctc = False
   if args.ewc:
     m_ewc = wav2vec2.wav2vec2_phone(num_class=1251, use_last=False, use_layers=3,
       num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len,
-      single_output=True)
+      single_output=True, norm_wav=True)
 else:
   m = wav2vec2.wav2vec2_phone(use_last=False, use_layers=12,
     num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
