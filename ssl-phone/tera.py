@@ -1,12 +1,17 @@
 import tensorflow as tf
 from util import *
 from spec_ops import *
-import parse_data
 from mask import mask_tera
 from tf_seq2seq_losses import classic_ctc_loss as _ctc_loss
 
 tf_sum = tf.math.reduce_sum
 tf_expd = tf.expand_dims
+
+def _normalize_wav_decibel(wav, target_level=-25):
+  rms = (tf.math.reduce_mean(wav**2, -1, keepdims=True))**0.5
+  scalar = (10 ** (target_level / 20)) / (rms + 1e-10)
+  wav = wav * scalar
+  return wav
 
 class inputrep(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
@@ -388,8 +393,8 @@ class tera_unet(tf.keras.layers.Layer):
       e_len = tf.tile(tf.expand_dims(e_len, 0), [tf.shape(e)[0]])
       e_len = tf.expand_dims(e_len, -1)
 
-    e = parse_data._normalize_wav_decibel(e)
-    e = parse_data.melspec(e, num_mel_bins=80,
+    e = _normalize_wav_decibel(e)
+    e = melspec(e, num_mel_bins=80,
             frame_length=n_fft, frame_step=hop_len, fft_length=n_fft,
             lower_edge_hertz=0., upper_edge_hertz=8000.)
     e_len = tf.cast((e_len - n_fft) / hop_len, tf.int32) + 1
@@ -438,7 +443,7 @@ class tera_unet(tf.keras.layers.Layer):
     _in = x
 
     x, x_len = self._conv_spec(x, x_len)
-    xs, _ = self.tera((x, x_len), training=training)
+    xs, _ = self.tera(x, training=training)
     x = xs[-1]
 
     x = tf.keras.activations.gelu(x)
