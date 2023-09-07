@@ -27,18 +27,20 @@ for font_file in font_files:
 plt.rcParams['font.family'] = 'Latin Modern Roman'
 plt.rcParams["mathtext.fontset"] = 'cm'
 
-fig = plt.figure(figsize=[19.2, 4.8])
-ax_2d = fig.add_subplot(1, 3, 1)
+fig = plt.figure(figsize=[19.2, 9.6])
+ax_2d = fig.add_subplot(1, 2, 1)
 ax_2d.xaxis.grid(color='gray', linestyle='dashed')
 ax_2d.yaxis.grid(color='gray', linestyle='dashed')
+ax_2d.set_box_aspect(1)
 
-ax_2d_2 = fig.add_subplot(1, 3, 2)
-ax_2d_2.xaxis.grid(color='gray', linestyle='dashed')
-ax_2d_2.yaxis.grid(color='gray', linestyle='dashed')
+#ax_2d_2 = fig.add_subplot(1, 3, 2)
+#ax_2d_2.xaxis.grid(color='gray', linestyle='dashed')
+#ax_2d_2.yaxis.grid(color='gray', linestyle='dashed')
 
-ax_2d_3 = fig.add_subplot(1, 3, 3)
+ax_2d_3 = fig.add_subplot(1, 2, 2)
 ax_2d_3.xaxis.grid(color='gray', linestyle='dashed')
 ax_2d_3.yaxis.grid(color='gray', linestyle='dashed')
+ax_2d_3.set_box_aspect(1)
 
 logs_list = []; logdir_list = []
 for logfile in args.log:
@@ -111,6 +113,7 @@ for lidx, (logs, logdir) in enumerate(zip(logs_list, logdir_list)):
         ax_2d.set_xlabel("Iterations")
     ax_2d.legend(loc='upper right')
     
+    '''
     ax_2d_2.plot(np.arange(len(slosses)), slosses,
             linestyle=linestyle,
             color=color,
@@ -125,6 +128,7 @@ for lidx, (logs, logdir) in enumerate(zip(logs_list, logdir_list)):
         ax_2d_2.set_ylabel("SSL loss ($\\mathcal{L}_{tera}$)")
         ax_2d_2.set_xlabel("Iterations")
     ax_2d_2.legend(loc='center right')
+    '''
     
     ax_2d_3.plot(np.arange(len(wdiffs)), wdiffs,
             linestyle=linestyle,
@@ -141,4 +145,5 @@ for lidx, (logs, logdir) in enumerate(zip(logs_list, logdir_list)):
         ax_2d_3.set_xlabel("Iterations")
     ax_2d_3.legend(loc='lower right')
 
+plt.tight_layout()
 plt.savefig('fig5.png')

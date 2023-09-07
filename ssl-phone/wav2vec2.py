@@ -8,6 +8,12 @@ tf_sum = tf.math.reduce_sum
 tf_expd = tf.expand_dims
 gelu = tf.keras.activations.gelu
 
+def _normalize_wav_decibel(wav, target_level=-25):
+  rms = (tf.math.reduce_mean(wav**2, -1, keepdims=True))**0.5
+  scalar = (10 ** (target_level / 20)) / (rms + 1e-10)
+  wav = wav * scalar
+  return wav
+
 def sample_negative_indices(batch_size, seq_len, 
                             mask_time_indices = None, num_neg = 100):
   if mask_time_indices is None:
@@ -254,10 +260,12 @@ class encoder(tf.keras.layers.Layer):
 class wav2vec2(tf.keras.layers.Layer):
   def __init__(self,
                num_enc_layer=1,
+               norm_wav=False,
                *args, **kwargs):
     super(wav2vec2, self).__init__(*args, **kwargs)
    
     self.num_enc_layer = num_enc_layer
+    self.norm_wav = norm_wav
 
   def build(self, input_shape):
     self.fe = featencoder()
@@ -280,6 +288,9 @@ class wav2vec2(tf.keras.layers.Layer):
     else:
       x = inputs
 
+    if self.norm_wav:
+      x = _normalize_wav_decibel(x)
+
     x = self.fe(tf_expd(x, -1))
     x, x_feat = self.fp(x)
 
@@ -291,12 +302,15 @@ class wav2vec2(tf.keras.layers.Layer):
     return encs, x_feat
 
 class wav2vec2_seq(tf.keras.layers.Layer):
-  def __init__(self, num_enc_layer=12, *args, **kwargs):
+  def __init__(self, num_enc_layer=12, 
+               norm_wav=False, *args, **kwargs):
     super(wav2vec2_seq, self).__init__(*args, **kwargs)
+
     self.num_enc_layer = num_enc_layer
+    self.norm_wav = norm_wav
 
   def build(self, input_shape):
-    self.wav2vec2 = wav2vec2(self.num_enc_layer)
+    self.wav2vec2 = wav2vec2(self.num_enc_layer, norm_wav=self.norm_wav)
 
     self.project_hid = tf.keras.layers.Dense(256, use_bias=True)
     self.project_q = tf.keras.layers.Dense(256, use_bias=True)
@@ -432,6 +446,7 @@ class wav2vec2_phone(tf.keras.layers.Layer):
                use_last=False, use_layers=12, num_neg=100,
                mask_prob=0.05, mask_len=10,
                single_output=False,
+               norm_wav=False,
                *args, **kwargs):
     super(wav2vec2_phone, self).__init__(*args, **kwargs)
     
@@ -444,11 +459,12 @@ class wav2vec2_phone(tf.keras.layers.Layer):
     self.mask_len = mask_len
     self.min_masks = 2
     self.single_output = single_output
+    self.norm_wav = norm_wav
 
   def build(self, input_shape):
     conv_opt = dict(padding='same', use_bias=False)
 
-    self.wav2vec2 = wav2vec2_seq(self.num_enc_layer)
+    self.wav2vec2 = wav2vec2_seq(self.num_enc_layer, norm_wav=self.norm_wav)
     
     self.proj = tf.keras.layers.Dense(256, use_bias=True)
     self.linear = tf.keras.layers.Dense(self.num_class, use_bias=True)
@@ -547,15 +563,22 @@ class wav2vec2_phone(tf.keras.layers.Layer):
     else:
       x = sum(encs[:(self.use_layers+1)])
 
+    if self.single_output:
+      if x_len is not None:
+        attn_mask = tf.sequence_mask(tf.squeeze(x_len, -1), tf.shape(x)[1])
+        attn_mask = tf.cast(attn_mask, dtype=x.dtype)
+        x_sum = tf.math.reduce_sum(tf_expd(attn_mask, -1) * x, axis=1, keepdims=True)
+        x = x_sum / tf_expd(tf.cast(x_len, tf.float32), -1)
+
+      else:
+        x = tf.math.reduce_mean(x, axis=1, keepdims=True)
+
     if stop_grad:
       x = tf.stop_gradient(x)
 
     x = gelu(x)
     
     x = self.proj(x)
-
-    if self.single_output:
-      x = tf.math.reduce_mean(x, axis=1, keepdims=True)
 
     # TODO in s3prl, no activation between two linear layers
     x = self.linear(x)
