@@ -80,10 +80,12 @@ class featencoder(tf.keras.layers.Layer):
   def call(self, inputs, training=None, eps=1e-10):
     x = inputs
 
+    fes = []
     for conv in self.conv_layers:
+      fes.append(x)
       x = conv(x)
 
-    return x
+    return x, fes
 
 class featproj(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
@@ -291,7 +293,7 @@ class wav2vec2(tf.keras.layers.Layer):
     if self.norm_wav:
       x = _normalize_wav_decibel(x)
 
-    x = self.fe(tf_expd(x, -1))
+    x, fes = self.fe(tf_expd(x, -1))
     x, x_feat = self.fp(x)
 
     if mask_time_indices is not None:
@@ -299,7 +301,7 @@ class wav2vec2(tf.keras.layers.Layer):
       x = self.masked_spec_embed * _mask + x * (1. - _mask)
 
     encs = self.enc((x, attn_mask))
-    return encs, x_feat
+    return encs, x_feat, fes
 
 class wav2vec2_seq(tf.keras.layers.Layer):
   def __init__(self, num_enc_layer=12, 
@@ -331,7 +333,7 @@ class wav2vec2_seq(tf.keras.layers.Layer):
       assert isinstance(inputs, tuple) and len(inputs) == 4
       x, mask_time_indices, sampled_negative_indices, attn_mask = inputs
 
-      encs, x_feat = self.wav2vec2((x, mask_time_indices, attn_mask), training=training)
+      encs, x_feat, _ = self.wav2vec2((x, mask_time_indices, attn_mask), training=training)
       x = encs[-1]
     
       x = self.project_hid(x)
@@ -340,7 +342,7 @@ class wav2vec2_seq(tf.keras.layers.Layer):
     if isinstance(inputs, tuple) and len(inputs) == 5:
       x, qx_feat, mask_time_indices, sampled_negative_indices, attn_mask = inputs
       
-      encs, x_feat = self.wav2vec2((x, mask_time_indices, attn_mask), training=training)
+      encs, x_feat, _ = self.wav2vec2((x, mask_time_indices, attn_mask), training=training)
       x = encs[-1]
     
       x = self.project_hid(x)
@@ -396,9 +398,9 @@ class wav2vec2_seq(tf.keras.layers.Layer):
       x = inputs
 
     if not skip_encs:
-      encs, x_feat = self.wav2vec2((x, mask_time_indices, attn_mask), training=training)
+      encs, x_feat, fes = self.wav2vec2((x, mask_time_indices, attn_mask), training=training)
       if sampled_negative_indices is None:
-        return encs, x_feat
+        return encs, x_feat, fes
 
     x = encs[-1]
 
@@ -555,7 +557,7 @@ class wav2vec2_phone(tf.keras.layers.Layer):
       ref = None; ref_len = None
       attn_mask = None
 
-    encs, _ = self.wav2vec2((x, attn_mask), training=training)
+    encs, _, __ = self.wav2vec2((x, attn_mask), training=training)
     assert len(encs) == (self.num_enc_layer + 1)
 
     if self.use_last:
@@ -640,5 +642,223 @@ class wav2vec2_phone(tf.keras.layers.Layer):
         ce_loss /= (tf.math.reduce_sum(ce_mask) + 1e-9)
 
         return ce_loss, seq_loss
+
+    return x
+
+class wav2vec2_unet(tf.keras.layers.Layer):
+  def __init__(self, 
+               num_enc_layer=1,
+               norm_wav=False,
+               *args, **kwargs):
+    super(wav2vec2_unet, self).__init__(*args, **kwargs)
+    
+    self.num_enc_layer = num_enc_layer
+    self.layer = 7
+    self.dims = [64 for _ in range(self.layer)]
+    self.strides = [5, 2, 2, 2, 2, 2, 2]
+    self.ksizes = [10, 5, 5, 5, 5, 5, 5] #[10, 3, 3, 3, 3, 2, 2]
+    self.sublayer = 4
+    self.norm_wav = norm_wav
+
+  def build(self, input_shape):
+    conv_opt = dict(padding='same', use_bias=False)
+
+    if isinstance(input_shape, tuple):
+      self.ref_len = input_shape[0][1]
+    
+    else:
+      self.ref_len = input_shape[1]
+
+    self.wav2vec2 = wav2vec2_seq(self.num_enc_layer, norm_wav=self.norm_wav)
+    
+    self.up_convs = []
+    for idx in range(self.layer):
+      dim = self.dims[::-1][idx]
+      ksize = self.ksizes[::-1][idx]
+      stride = self.strides[::-1][idx]
+
+      self.up_convs.append((
+        conv1dtrans(dim, ksize, strides=stride, **conv_opt),
+        conv1d(dim, 1, strides=1, use_bias=True),
+        [
+          conv1d(None, 16, strides=1, **conv_opt) \
+            for _idx in range(self.sublayer)
+        ]
+      ))
+    
+    self.conv_post = conv1d(1, 16, **conv_opt)
+  
+  def call(self, inputs, training=None,
+           ssl_loss=False, stop_grad=False, ctc=False,
+           ssl_only=False, ssl_only_ewc=False): # ctc option is ignored
+    if ssl_only_ewc:
+      assert isinstance(inputs, tuple) and len(inputs) == 2
+      x_feat, x_feat_len = inputs
+      batch_size = x_feat.shape[0]
+      
+      max_x_feat_len = mask.get_feat_extract_output_length(tf.shape(x_feat)[1])
+      x_feat_len = mask.get_feat_extract_output_length(x_feat_len)
+      feat_attn_mask = tf.sequence_mask(tf.squeeze(x_feat_len, -1), max_x_feat_len)
+
+      mask_time_indices = mask.compute_mask_indices(
+        batch_size, max_x_feat_len,
+        tf.cast(feat_attn_mask, tf.int32),
+        self.mask_prob, self.mask_len, self.min_masks)
+
+      sampled_negative_indices = sample_negative_indices(
+        batch_size, max_x_feat_len, mask_time_indices, self.num_neg)
+        
+      feat_attn_mask = 1. - tf.cast(feat_attn_mask, dtype=tf.float32)
+      feat_attn_mask *= -1e9
+
+      seq_loss = self.wav2vec2(
+        (x_feat, mask_time_indices, sampled_negative_indices, feat_attn_mask), training=training)
+
+      return seq_loss
+
+    if ssl_only:
+      assert isinstance(inputs, tuple) and len(inputs) == 2
+      x_feat, x_feat_len = inputs
+      batch_size = x_feat.shape[0]
+      
+      max_x_feat_len = mask.get_feat_extract_output_length(tf.shape(x_feat)[1])
+      x_feat_len = mask.get_feat_extract_output_length(x_feat_len)
+      feat_attn_mask = tf.sequence_mask(tf.squeeze(x_feat_len, -1), max_x_feat_len)
+
+      mask_time_indices = mask.compute_mask_indices(
+        batch_size, max_x_feat_len,
+        tf.cast(feat_attn_mask, tf.int32),
+        self.mask_prob, self.mask_len, self.min_masks)
+
+      sampled_negative_indices = sample_negative_indices(
+        batch_size, max_x_feat_len, mask_time_indices, self.num_neg)
+        
+      feat_attn_mask = 1. - tf.cast(feat_attn_mask, dtype=tf.float32)
+      feat_attn_mask *= -1e9
+        
+      _x = self.wav2vec2(
+        (x_feat, mask_time_indices, sampled_negative_indices, feat_attn_mask),
+        ssl_only=True, training=training)
+
+      return mask_time_indices, sampled_negative_indices, _x
+   
+    mask_time_indices = None
+    sampled_negative_indices = None
+    qx_feat = None
+    neg_qx_feat = None
+    perp = None
+    ema_x_feat = None
+
+    if isinstance(inputs, tuple) and len(inputs) == 9:
+      x, x_feat, ref, x_len, x_feat_len, ref_len, mask_time_indices, sampled_negative_indices, ema_x_feat = inputs
+      attn_mask = None
+
+    elif isinstance(inputs, tuple) and (len(inputs) == 6 or len(inputs) == 4):
+      if len(inputs) == 6:
+        x, x_feat, ref, x_len, x_feat_len, ref_len = inputs
+
+      else:
+        x, ref, x_len, ref_len = inputs
+        x_feat = x; x_feat_len = x_len
+
+      max_x_len = mask.get_feat_extract_output_length(tf.shape(x)[1])
+      x_len = mask.get_feat_extract_output_length(x_len)
+      attn_mask = tf.sequence_mask(tf.squeeze(x_len, -1), max_x_len)
+      attn_mask = 1. - tf.cast(attn_mask, dtype=tf.float32)
+      attn_mask *= -1e9
+
+    else:
+      x = inputs
+      x_len = None
+      x_feat = None; x_feat_len = None
+      ref = None; ref_len = None
+      attn_mask = None
+
+    encs, _, fes = self.wav2vec2(x, training=training)
+    assert len(encs) == (self.num_enc_layer + 1)
+
+    x = encs[-1]
+
+    x = gelu(x)
+    #x = tf.stop_gradient(x)
+    
+    def pad(e, ref):
+      pad = tf.shape(ref)[1] - tf.shape(e)[1]
+      lpad = pad // 2
+      rpad = pad - lpad
+      e = tf.pad(e, tf.concat([[[0, 0]], [[lpad, rpad]], [[0, 0]]], 0), "CONSTANT")
+      return e
+
+    idx = 0; fes = fes[::-1]
+    for _enc, (up_conv, conv1x1, convs) in zip(fes, self.up_convs):
+      x = gelu(up_conv(x))
+      x = pad(x, _enc)
+      
+      _enc = gelu(conv1x1(_enc))
+      x = tf.concat([_enc, x], -1)
+
+      for conv in convs:
+        x = gelu(conv(x)) + x
+
+      idx += 1
+    
+    x = self.conv_post(x)
+    x = tf.math.tanh(x)
+    x = tf.squeeze(x, -1)
+
+    if ref is not None:
+      seq_loss = 0.
+
+      if ssl_loss:
+        batch_size = x_feat.shape[0]
+      
+        max_x_feat_len = mask.get_feat_extract_output_length(tf.shape(x_feat)[1])
+        x_feat_len = mask.get_feat_extract_output_length(x_feat_len)
+        feat_attn_mask = tf.sequence_mask(tf.squeeze(x_feat_len, -1), max_x_feat_len)
+
+        if mask_time_indices is None:
+          mask_time_indices = mask.compute_mask_indices(
+            batch_size, max_x_feat_len,
+            tf.cast(feat_attn_mask, tf.int32),
+            self.mask_prob, self.mask_len, self.min_masks)
+
+          sampled_negative_indices = sample_negative_indices(
+            batch_size, max_x_feat_len, mask_time_indices, self.num_neg)
+        
+          feat_attn_mask = 1. - tf.cast(feat_attn_mask, dtype=tf.float32)
+          feat_attn_mask *= -1e9
+
+          seq_loss = self.wav2vec2(
+            (x_feat, mask_time_indices, sampled_negative_indices, feat_attn_mask), training=training)
+
+        else: 
+          feat_attn_mask = 1. - tf.cast(feat_attn_mask, dtype=tf.float32)
+          feat_attn_mask *= -1e9
+
+          seq_loss = self.wav2vec2(
+            (x_feat, ema_x_feat, mask_time_indices, sampled_negative_indices, feat_attn_mask), training=training)
+
+      samp_loss = tf.math.reduce_mean((x - ref) ** 2)
+
+      def stft_loss(x, ref, frame_length, frame_step, fft_length):
+        stft_opt = dict(frame_length=frame_length,
+          frame_step=frame_step, fft_length=fft_length)
+        mag_x = tf.math.abs(stft(x, **stft_opt))
+        mag_ref = tf.math.abs(stft(ref, **stft_opt))
+
+        fro_opt = dict(axis=(-2, -1), ord='fro')
+        sc_loss = tf.norm(mag_x - mag_ref, **fro_opt) / (tf.norm(mag_x, **fro_opt) + 1e-9)
+        sc_loss = tf.reduce_mean(sc_loss)
+
+        mag_loss = tf.math.log(mag_x + 1e-9) - tf.math.log(mag_ref + 1e-9)
+        mag_loss = tf.reduce_mean(tf.math.abs(mag_loss))
+
+        return sc_loss + mag_loss
+
+      spec_loss = stft_loss(x, ref, 25, 5, 1024)
+      spec_loss += stft_loss(x, ref, 50, 10, 2048)
+      spec_loss += stft_loss(x, ref, 10, 2, 512)
+
+      return samp_loss + spec_loss, seq_loss
 
     return x
