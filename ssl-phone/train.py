@@ -44,6 +44,8 @@ parser.add_argument("--output", type=str, required=True)
 parser.add_argument("--timit", action='store_true')
 parser.add_argument("--speech-command", action='store_true')
 parser.add_argument("--voxceleb", action='store_true')
+parser.add_argument("--fluent-command", action='store_true')
+parser.add_argument("--voicebank", action='store_true')
 parser.add_argument("--warm-start", type=str, required=False, default=None)
 parser.add_argument("--stop-grad", action='store_true')
 parser.add_argument("--from-init", action='store_true')
@@ -73,7 +75,20 @@ elif args.voxceleb:
   if args.lr_decay_step is None: args.lr_decay_step = 300
   if args.eval_list is None: args.eval_list = "/data/hejung/vox1/test.wav.key"
 
-else:
+elif args.fluent_command:
+  # TODO
+  if args.save_step is None: args.save_step = 100
+  if args.train_step is None: args.train_step = 4000
+  if args.lr_decay_step is None: args.lr_decay_step = 300
+  if args.eval_list is None: args.eval_list = "/data/hejung/speech-commands/test.v1.wav.key"
+
+elif args.voicebank:
+  if args.save_step is None: args.save_step = 1000
+  if args.train_step is None: args.train_step = 100000
+  if args.lr_decay_step is None: args.lr_decay_step = 2000
+  if args.eval_list is None: args.eval_list = "/data/hejung/voicebank-demand/testset.list"
+
+else: # libri-100
   if args.save_step is None: args.save_step = 10000
   if args.train_step is None: args.train_step = 45000
   if args.lr_decay_step is None: args.lr_decay_step = 4000
@@ -88,11 +103,23 @@ import metric
 import soundfile
 assert os.path.isfile(args.eval_list)
 evals = [e.strip() for e in open(args.eval_list, "r").readlines()]
-eval_pcms = []
-for idx, pcm_ref in enumerate(evals):
-  _pcm = pcm_ref.split()[0]
-  _pcm, _ = soundfile.read(_pcm)
-  eval_pcms.append(_pcm)
+
+if args.voicebank:
+  import librosa
+  eval_pcms = []
+  for idx, ref_pcm in enumerate(evals):
+    _pcm = ref_pcm.split()[1]
+    _pcm, _ = librosa.load(_pcm, sr=16000)
+    _ref = ref_pcm.split()[0]
+    _ref, _ = librosa.load(_ref, sr=16000)
+    eval_pcms.append((_pcm, _ref))
+
+else:
+  eval_pcms = []
+  for idx, pcm_ref in enumerate(evals):
+    _pcm = pcm_ref.split()[0]
+    _pcm, _ = soundfile.read(_pcm)
+    eval_pcms.append(_pcm)
 
 if args.end_ssl is None:
   args.end_ssl = args.train_step
@@ -146,7 +173,8 @@ tfrec_args = os.path.join(args.tfrec, "ARGS")
 with open(tfrec_args, "r") as f:
   _json = json.loads(f.readlines()[-1])
   samp_len = _json["samp_len"]
-  txt_len = _json["text_len"]
+  if "text_len" in _json:
+    txt_len = _json["text_len"]
   spec_len = int((samp_len - 400 + 400) / 160) + 1 
 
 if args.val_tfrec is not None:
@@ -154,7 +182,8 @@ if args.val_tfrec is not None:
   with open(val_tfrec_args, "r") as f:
     _json = json.loads(f.readlines()[-1])
     val_samp_len = _json["samp_len"]
-    val_txt_len = _json["text_len"]
+    if "text_len" in _json:
+      val_txt_len = _json["text_len"]
     val_spec_len = int((val_samp_len - 400 + 400) / 160) + 1 
   if val_samp_len != samp_len:
     sys.exit('validation data has sample length {}'.format(val_samp_len))
@@ -205,10 +234,16 @@ if gpus:
 
 import parse_data
 import glob
+from pesq import pesq
+from pystoi import stoi
 
 tfrec_list = glob.glob(os.path.join(args.tfrec, "train-*.tfrecord"))
-dataset = parse_data.gen_train(tfrec_list, spec_len, txt_len,
-  batch_size=args.batch_size, seed=seed)
+if args.voicebank:
+  dataset = parse_data.gen_train_vbank(tfrec_list, samp_len,
+    batch_size=args.batch_size, seed=seed)
+else:
+  dataset = parse_data.gen_train(tfrec_list, spec_len, txt_len,
+    batch_size=args.batch_size, seed=seed)
 
 val_dataset = None
 if args.val_tfrec is not None:
@@ -219,8 +254,12 @@ if args.val_tfrec is not None:
 ssl_dataset = None
 if args.ssl_tfrec is not None:
   ssl_tfrec_list = glob.glob(os.path.join(args.ssl_tfrec, "train-*.tfrecord"))
-  ssl_dataset = parse_data.gen_train(ssl_tfrec_list, ssl_spec_len, None,
-    batch_size=args.batch_size, seed=seed)
+  if args.voicebank:
+    ssl_dataset = parse_data.gen_train_vbank(ssl_tfrec_list, ssl_samp_len,
+      batch_size=args.batch_size, seed=seed)
+  else:
+    ssl_dataset = parse_data.gen_train(ssl_tfrec_list, ssl_spec_len, None,
+      batch_size=args.batch_size, seed=seed)
 
 lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
@@ -247,6 +286,20 @@ elif args.voxceleb:
   is_ctc = False
   if args.ewc:
     m_ewc = tera.tera_phone(num_class=1251, use_last=True, single_output=True)
+elif args.fluent_command:
+  # TODO
+  m = tera.tera_phone(num_class=10, use_last=True, single_output=True)
+  m_ema = tera.tera_phone(num_class=10, use_last=True, single_output=True)
+  is_ctc = False
+  if args.ewc:
+    m_ewc = tera.tera_phone(num_class=10, use_last=True, single_output=True)
+elif args.voicebank:
+  # TODO
+  m = tera.tera_unet()
+  m_ema = tera.tera_unet()
+  is_ctc = False
+  if args.ewc:
+    m_ewc = tera.tera_unet()
 else:
   m = tera.tera_phone(use_last=False)
   m_ema = tera.tera_phone(use_last=False)
@@ -255,7 +308,10 @@ else:
     m_ewc = tera.tera_phone(use_last=False)
 
 if args.accum_step > 1:
-  _in = np.zeros((args.batch_size, spec_len, 80), dtype=np.float32)
+  if args.voicebank:
+    _in = np.zeros((args.batch_size, samp_len), dtype=np.float32)
+  else:
+    _in = np.zeros((args.batch_size, spec_len, 80), dtype=np.float32)
   _ = m(_in, ctc = is_ctc)
   _ = m_ema(_in, ctc = is_ctc)
 
@@ -278,8 +334,8 @@ if args.profile:
   tf.profiler.experimental.start(logdir)
 
 @tf.function
-def run_step(step, spec, ssl_spec, txt,
-             spec_len, ssl_spec_len, txt_len,
+def run_step(step, spec, ssl_spec, ref,
+             spec_len, ssl_spec_len, ref_len,
              training=True, accum=False,
              stop_grad=False, update_ema=False):
   ssl_weight = 0.
@@ -302,7 +358,7 @@ def run_step(step, spec, ssl_spec, txt,
 
     with tf.GradientTape(persistent=True) as tape, log_writer.as_default():
       loss, _, _seq_out = m(
-        (spec, ssl_spec, txt, spec_len, ssl_spec_len, txt_len, mask_label),
+        (spec, ssl_spec, ref, spec_len, ssl_spec_len, ref_len, mask_label),
         training = training, 
         ssl_loss = (not (args.ssl_weight == 0)),
         stop_grad = stop_grad,
@@ -325,7 +381,7 @@ def run_step(step, spec, ssl_spec, txt,
   else:
     with tf.GradientTape(persistent=True) as tape, log_writer.as_default():
       loss, sloss, _ = m(
-        (spec, ssl_spec, txt, spec_len, ssl_spec_len, txt_len),
+        (spec, ssl_spec, ref, spec_len, ssl_spec_len, ref_len),
         training = training, 
         ssl_loss = (not (args.ssl_weight == 0)),
         stop_grad = stop_grad,
@@ -378,6 +434,19 @@ def run_step(step, spec, ssl_spec, txt,
   return loss, sloss, ssl_weight
 
 def run_eval_step(pcm, pcm_len):
+  if args.voicebank:
+    def pad(pcm, mod = 32000):
+      if pcm.shape[-1] % mod != 0:
+        pcm = np.concatenate([pcm, np.zeros((1, mod-pcm.shape[-1]%mod))], -1)
+        return pcm, pcm.shape[-1]
+
+    pad_pcm, pad_pcm_len = pad(pcm)
+    pad_pcm = pad_pcm.astype(np.float32)
+
+    _hyp = m(pad_pcm, training=False)
+    hyp = np.squeeze(_hyp, 0)[:pcm_len]
+    return hyp
+
   if not (args.timit or args.speech_command or args.voxceleb):
     # sample_len-wise inference
     hyps = []
@@ -450,7 +519,10 @@ if args.warm_start is not None:
       opt_weight = np.load(opt_weight, allow_pickle=True)
       opt_cfg = np.load(opt_cfg, allow_pickle=True).flatten()[0] 
 
-  _in = np.zeros((args.batch_size, spec_len, 80), dtype=np.float32)
+  if args.voicebank:
+    _in = np.zeros((args.batch_size, samp_len), dtype=np.float32)
+  else:
+    _in = np.zeros((args.batch_size, spec_len, 80), dtype=np.float32)
   _ = m(_in)
   ckpt.read(args.warm_start).assert_consumed()
   _ = m_ema(_in)
@@ -481,21 +553,35 @@ for idx, (data, ssl_data) in enumerate(zip(dataset, ssl_dataset)):
   accum = not (idx % args.accum_step == 0)
   update_ema = (idx % args.ssl_ema_update == 0)
 
-  if ssl_data is not None:
-    ssl_spec = ssl_data["spec"]
-    ssl_spec_len = ssl_data["spec_len"]
+  if args.voicebank:
+    if ssl_data is not None:
+      ssl_pcm = ssl_data["pcm"]
+      ssl_pcm_len = ssl_data["samp_len"]
+
+    else:
+      ssl_pcm = data["pcm"]
+      ssl_pcm_len = data["samp_len"]
+
+    _in_arg = [data["pcm"], ssl_pcm, data["ref"],
+               data["samp_len"], ssl_pcm_len, data["samp_len"]]
 
   else:
-    ssl_spec = data["spec"]
-    ssl_spec_len = data["spec_len"]
+    if ssl_data is not None:
+      ssl_spec = ssl_data["spec"]
+      ssl_spec_len = ssl_data["spec_len"]
+
+    else:
+      ssl_spec = data["spec"]
+      ssl_spec_len = data["spec_len"]
+
+    _in_arg = [data["spec"], ssl_spec, data["txt"],
+               data["spec_len"], ssl_spec_len, data["txt_len"]]
 
   if args.profile:
     if idx > (init_epoch + _traced_begin) and _traced_cnt > 0:
       with tf.profiler.experimental.Trace('train', step_num=idx, _r=1):
         loss, sloss, sw = run_step(
-          tf.cast(idx, tf.int64),
-          data["spec"], ssl_spec, data["txt"], 
-          data["spec_len"], ssl_spec_len, data["txt_len"],
+          tf.cast(idx, tf.int64), *_in_arg,
           accum=accum, update_ema=update_ema, stop_grad=args.stop_grad)
       _traced_cnt -= 1
 
@@ -505,16 +591,12 @@ for idx, (data, ssl_data) in enumerate(zip(dataset, ssl_dataset)):
 
     else:
         loss, sloss, sw = run_step(
-          tf.cast(idx, tf.int64),
-          data["spec"], ssl_spec, data["txt"], 
-          data["spec_len"], ssl_spec_len, data["txt_len"],
+          tf.cast(idx, tf.int64), *_in_arg,
           accum=accum, update_ema=update_ema, stop_grad=args.stop_grad)
 
   else:
     loss, sloss, sw = run_step(
-      tf.cast(idx, tf.int64),
-      data["spec"], ssl_spec, data["txt"], 
-      data["spec_len"], ssl_spec_len, data["txt_len"],
+      tf.cast(idx, tf.int64), *_in_arg,
       accum=accum, update_ema=update_ema, stop_grad=args.stop_grad)
 
   log_writer.flush()
@@ -551,31 +633,53 @@ for idx, (data, ssl_data) in enumerate(zip(dataset, ssl_dataset)):
     prev_val_loss = min(prev_val_loss, val_loss)
 
   if idx > init_epoch and idx % args.save_step == 0:
-    pers = []
     expname = [e for e in args.output.split("/") if len(e) > 0][-1]
     resname = "{}-{}".format(expname, idx)
 
-    with open(os.path.join("results", "{}.eval".format(resname)), "w") as f:
-      for _pcm, pcm_ref in zip(eval_pcms, evals):
-        _pcm_len = _pcm.shape[0]
-        _pcm = np.expand_dims(_pcm, 0).astype(np.float32)
-
-        _ref = [int(e) for e in pcm_ref.split()[1:]]
-        hyp = run_eval_step(_pcm, _pcm_len)
-
-        if args.timit or args.speech_command or args.voxceleb:
-          _per = metric.per([" ".join(hyp)], [" ".join([str(e) for e in _ref])])
-        else:
-          _per = metric.per([hyp], [tokenizer.decode(_ref)])
-        
-        pers.append(_per)
+    if args.voicebank:
+      pesq_tot = 0; stoi_tot = 0
+      with open(os.path.join("results", "{}.eval".format(resname)), "w") as f:
+        for _pcm, ref in eval_pcms:
+          _pcm_len = _pcm.shape[0]
+          _pcm = np.expand_dims(_pcm, 0).astype(np.float32)
+          
+          hyp = run_eval_step(_pcm, _pcm_len)
+          _pesq = pesq(16000, ref, hyp)
+          _stoi = stoi(ref, hyp, 16000, extended=False)
       
-        f.write("{} {}\n".format(_per, " ".join(hyp)))
-        f.flush()
+          f.write("{} {}\n".format(_pesq, _stoi))
+          f.flush()
+      
+          pesq_tot += _pesq
+          stoi_tot += _stoi
     
-      f.write("final: {}\n".format(np.mean(pers)))
+        f.write("final: {} {}\n".format(
+          pesq_tot / len(evals), stoi_tot / len(evals)))
+      logger.info("gstep[{}] pesq[{:.4f}] stoi[{:.4f}]".format(idx,
+           pesq_tot / len(evals), stoi_tot / len(evals)))
 
-    logger.info("gstep[{}] per[{:.4f}]".format(idx, np.mean(pers)))
+    else:
+      pers = []
+      with open(os.path.join("results", "{}.eval".format(resname)), "w") as f:
+        for _pcm, pcm_ref in zip(eval_pcms, evals):
+          _pcm_len = _pcm.shape[0]
+          _pcm = np.expand_dims(_pcm, 0).astype(np.float32)
+
+          _ref = [int(e) for e in pcm_ref.split()[1:]]
+          hyp = run_eval_step(_pcm, _pcm_len)
+
+          if args.timit or args.speech_command or args.voxceleb:
+            _per = metric.per([" ".join(hyp)], [" ".join([str(e) for e in _ref])])
+          else:
+            _per = metric.per([hyp], [tokenizer.decode(_ref)])
+        
+          pers.append(_per)
+      
+          f.write("{} {}\n".format(_per, " ".join(hyp)))
+          f.flush()
+    
+        f.write("final: {}\n".format(np.mean(pers)))
+      logger.info("gstep[{}] per[{:.4f}]".format(idx, np.mean(pers)))
 
     modelname = "model-{}.ckpt".format(idx)
     modelpath = os.path.join(args.output, modelname)

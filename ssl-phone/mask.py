@@ -13,7 +13,7 @@ def mask_tera(x, x_len=None,
 
   if x_len is None:
     x_len = tf.cast(tf.shape(x)[1], tf.float32)
-    x_len = tf.tile(tf.expand_dims(x, 0), [batch_size])
+    x_len = tf.tile(tf.expand_dims(x_len, 0), [batch_size])
   else:
     x_len = tf.cast(tf.squeeze(x_len, -1), tf.float32)
     
