@@ -290,6 +290,10 @@ if args.ewc:
   _ = m_ewc((_in, _ref, _in_len, _ref_len),
     training = True, ssl_loss = do_ssl_loss, ctc = True)
 
+if args.ssl_from_ema:
+  _ = m((_in, _in_len), training = True, ssl_only = True)
+  _ = m_ema((_in, _in_len), training = True, ssl_only = True)
+
 accum_grads = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights]
 
 specs = [val.__spec__ for name, val in sys.modules.items() \
@@ -395,6 +399,7 @@ def run_step(step, pcm, ssl_pcm, txt,
         opt.apply_gradients(zip(accum_grads, weights))
 
         if update_ema:
+          assert len(m.trainable_weights) == len(m_ema.trainable_weights)
           for w, w_ema in zip(m.trainable_weights, m_ema.trainable_weights):
             delta = (1. - args.ssl_ema_beta) * (w - w_ema)
             w_ema.assign_add(delta)
