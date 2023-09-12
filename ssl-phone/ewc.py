@@ -19,8 +19,15 @@ def fisher_matrix(model, data):
              returned by `model.trainable_weights`.
     """
     weights = model.trainable_weights
-    weights = [e for e in weights if 'tera_phone/dense' not in e.name]
-    assert len(model.trainable_weights) - len(weights) == 4
+    is_unet = weights[0].name.startswith('tera_unet')
+
+    if is_unet:
+        weights = [e for e in weights if 'tera_unet/conv' not in e.name]
+        assert len(model.trainable_weights) - len(weights) == 2
+
+    else:
+        weights = [e for e in weights if 'tera_phone/dense' not in e.name]
+        assert len(model.trainable_weights) - len(weights) == 4
 
     variance = [tf.zeros_like(tensor) for tensor in weights]
 
@@ -34,6 +41,8 @@ def fisher_matrix(model, data):
 
         with tf.GradientTape() as tape:
             mask_label, seq_out = model((spec, spec_len), ssl_only = True)
+            if is_unet:
+                spec, _ = model._conv_spec(spec, spec_len) 
 
             loss = tf.math.abs(mask_label * (seq_out - spec))
             loss = tf.math.reduce_sum(loss, [-1, -2])
@@ -60,7 +69,10 @@ def ewc_loss(lam, model, optimal_weights, samples):
     The penalty is scaled according to how important each weight is for the
     given dataset, and `lam` (lambda) applies equally to all weights.
     """
-    optimal_weights = [e for e in optimal_weights if 'tera_phone/dense' not in e.name]
+    if optimal_weights[0].name.startswith('tera_unet'):
+        optimal_weights = [e for e in optimal_weights if 'tera_unet/conv' not in e.name]
+    else:
+        optimal_weights = [e for e in optimal_weights if 'tera_phone/dense' not in e.name]
     fisher_diagonal = fisher_matrix(model, samples)
 
     def loss_fn(new_model):
@@ -68,7 +80,10 @@ def ewc_loss(lam, model, optimal_weights, samples):
         # sum [(lambda / 2) * F * (current weights - optimal weights)^2]
         loss = 0
         current = new_model.trainable_weights
-        current = [e for e in current if 'tera_phone/dense' not in e.name]
+        if current[0].name.startswith('tera_unet'):
+            current = [e for e in current if 'tera_unet/conv' not in e.name]
+        else:
+            current = [e for e in current if 'tera_phone/dense' not in e.name]
 
         for f, c, o in zip(fisher_diagonal, current, optimal_weights):
             loss += tf.reduce_sum(f * ((c - o) ** 2))
