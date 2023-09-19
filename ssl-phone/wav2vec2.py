@@ -649,6 +649,7 @@ class wav2vec2_unet(tf.keras.layers.Layer):
   def __init__(self, 
                num_enc_layer=1,
                norm_wav=False,
+               num_neg=100, mask_prob=0.05, mask_len=10,
                *args, **kwargs):
     super(wav2vec2_unet, self).__init__(*args, **kwargs)
     
@@ -659,6 +660,11 @@ class wav2vec2_unet(tf.keras.layers.Layer):
     self.ksizes = [10, 5, 5, 5, 5, 5, 5] #[10, 3, 3, 3, 3, 2, 2]
     self.sublayer = 4
     self.norm_wav = norm_wav
+    
+    self.num_neg = num_neg
+    self.mask_prob = mask_prob
+    self.mask_len = mask_len
+    self.min_masks = 2
 
   def build(self, input_shape):
     conv_opt = dict(padding='same', use_bias=False)

@@ -258,7 +258,7 @@ ssl_dataset = None
 if args.ssl_tfrec is not None:
   ssl_tfrec_list = glob.glob(os.path.join(args.ssl_tfrec, "train-*.tfrecord"))
   if args.voicebank:
-    ssl_dataset = parse_data.gen_train_vbank(ssl_tfrec_list, ssl_samp_len,
+    ssl_dataset = parse_data_w2v.gen_train_vbank(ssl_tfrec_list, ssl_samp_len,
       batch_size=args.batch_size, seed=seed)
   else:
     ssl_dataset = parse_data_w2v.gen_train(ssl_tfrec_list, ssl_samp_len, None,
@@ -319,11 +319,14 @@ elif args.fluent_command:
       single_output=True, norm_wav=True)
 elif args.voicebank:
   # TODO
-  m = wav2vec2.wav2vec2_unet()
-  m_ema = wav2vec2.wav2vec2_unet()
+  m = wav2vec2.wav2vec2_unet(
+    num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
+  m_ema = wav2vec2.wav2vec2_unet(
+    num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
   is_ctc = False
   if args.ewc:
-    m_ewc = wav2vec2.wav2vec2_unet()
+    m_ewc = wav2vec2.wav2vec2_unet(
+      num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)
 else:
   m = wav2vec2.wav2vec2_phone(use_last=False, use_layers=12,
     num_neg=args.num_neg, mask_prob=args.mask_prob, mask_len=args.mask_len)

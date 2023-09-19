@@ -10,8 +10,7 @@ model = wav2vec2_unet()
 import numpy as np
 pcm = np.zeros(128000)
 _in = np.reshape(pcm, [1, -1])
-_ref = np.zeros([1, 399])
-_tmp = model((_in, _ref, np.ones([1, 1])*128000, np.ones([1, 1])*399), ssl_loss=True)
+_tmp = model((_in, _in, np.ones([1, 1])*128000, np.ones([1, 1])*128000), ssl_loss=True)
 
 def load_norm(prefix, e):
   w = m['{}.weight'.format(prefix, i)].cpu().numpy()
