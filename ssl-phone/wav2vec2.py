@@ -534,7 +534,12 @@ class wav2vec2_phone(tf.keras.layers.Layer):
 
     if isinstance(inputs, tuple) and len(inputs) == 9:
       x, x_feat, ref, x_len, x_feat_len, ref_len, mask_time_indices, sampled_negative_indices, ema_x_feat = inputs
-      attn_mask = None
+      
+      max_x_len = mask.get_feat_extract_output_length(tf.shape(x)[1])
+      x_len = mask.get_feat_extract_output_length(x_len)
+      attn_mask = tf.sequence_mask(tf.squeeze(x_len, -1), max_x_len)
+      attn_mask = 1. - tf.cast(attn_mask, dtype=tf.float32)
+      attn_mask *= -1e9
 
     elif isinstance(inputs, tuple) and (len(inputs) == 6 or len(inputs) == 4):
       if len(inputs) == 6:

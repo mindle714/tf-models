@@ -76,11 +76,10 @@ elif args.voxceleb:
   if args.eval_list is None: args.eval_list = "/data/hejung/vox1/test.wav.key"
 
 elif args.fluent_command:
-  # TODO
   if args.save_step is None: args.save_step = 100
   if args.train_step is None: args.train_step = 4000
   if args.lr_decay_step is None: args.lr_decay_step = 300
-  if args.eval_list is None: args.eval_list = "/data/hejung/speech-commands/test.v1.wav.key"
+  if args.eval_list is None: args.eval_list = "/data/hejung/fluent-commands/test.wav.key"
 
 elif args.voicebank:
   if args.save_step is None: args.save_step = 1000
@@ -287,14 +286,12 @@ elif args.voxceleb:
   if args.ewc:
     m_ewc = tera.tera_phone(num_class=1251, use_last=True, single_output=True)
 elif args.fluent_command:
-  # TODO
-  m = tera.tera_phone(num_class=10, use_last=True, single_output=True)
-  m_ema = tera.tera_phone(num_class=10, use_last=True, single_output=True)
+  m = tera.tera_phone(num_class=336, use_last=True, single_output=True)
+  m_ema = tera.tera_phone(num_class=336, use_last=True, single_output=True)
   is_ctc = False
   if args.ewc:
-    m_ewc = tera.tera_phone(num_class=10, use_last=True, single_output=True)
+    m_ewc = tera.tera_phone(num_class=336, use_last=True, single_output=True)
 elif args.voicebank:
-  # TODO
   m = tera.tera_unet()
   m_ema = tera.tera_unet()
   is_ctc = False
@@ -447,7 +444,7 @@ def run_eval_step(pcm, pcm_len):
     hyp = np.squeeze(_hyp, 0)[:pcm_len]
     return hyp
 
-  if not (args.timit or args.speech_command or args.voxceleb):
+  if not (args.timit or args.speech_command or args.voxceleb or args.fluent_command):
     # sample_len-wise inference
     hyps = []
     for idx in range(int(np.ceil(pcm_len / samp_len))):
@@ -470,7 +467,7 @@ def run_eval_step(pcm, pcm_len):
 
   maxids = np.argmax(np.squeeze(_hyp, 0), -1)
 
-  if args.timit or args.speech_command or args.voxceleb:
+  if args.timit or args.speech_command or args.voxceleb or args.fluent_command:
     return [str(e) for e in maxids]
 
   def greedy(hyp):
@@ -668,7 +665,7 @@ for idx, (data, ssl_data) in enumerate(zip(dataset, ssl_dataset)):
           _ref = [int(e) for e in pcm_ref.split()[1:]]
           hyp = run_eval_step(_pcm, _pcm_len)
 
-          if args.timit or args.speech_command or args.voxceleb:
+          if args.timit or args.speech_command or args.voxceleb or args.fluent_command:
             _per = metric.per([" ".join(hyp)], [" ".join([str(e) for e in _ref])])
           else:
             _per = metric.per([hyp], [tokenizer.decode(_ref)])
