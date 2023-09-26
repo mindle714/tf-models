@@ -138,17 +138,17 @@ if gpus:
     # Memory growth must be set before GPUs have been initialized
     print(e)
 
-import parse_data_w2v
+import parse_data
 import glob
 
 tfrec_list = glob.glob(os.path.join(args.tfrec, "train-*.tfrecord"))
-dataset = parse_data_w2v.gen_train(tfrec_list, samp_len, txt_len,
+dataset = parse_data.gen_train(tfrec_list, samp_len, txt_len, no_spec=True,
   batch_size=args.batch_size, seed=seed)
 
 val_dataset = None
 if args.val_tfrec is not None:
   val_tfrec_list = glob.glob(os.path.join(args.val_tfrec, "train-*.tfrecord"))
-  val_dataset = parse_data_w2v.gen_val(val_tfrec_list, val_samp_len,
+  val_dataset = parse_data.gen_val(val_tfrec_list, val_samp_len, no_spec=True,
     batch_size=args.batch_size, seed=seed)
 
 lr = tf.Variable(args.begin_lr, trainable=False)
