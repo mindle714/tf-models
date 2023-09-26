@@ -65,8 +65,14 @@ with open(os.path.join(args.output, "test.wav.txt"), "w") as f:
       noise_idx = (noise_idx + 1) % len(noise_list)
       if sig_pow(noise) != 0: break
 
-    ns_repeat = pcm.shape[0] // noise.shape[0] + (pcm.shape[0] % noise.shape[0] != 0)
-    noise = np.tile(noise, ns_repeat)[:pcm.shape[0]]
+    if pcm.shape[0] > noise.shape[0]:
+      ns_repeat = pcm.shape[0] // noise.shape[0] + (pcm.shape[0] % noise.shape[0] != 0)
+      noise = np.tile(noise, ns_repeat)[:pcm.shape[0]]
+
+    else:
+      noise_pos = np.random.randint(0, noise.shape[0] - pcm.shape[0] + 1) 
+      noise = noise[noise_pos:noise_pos + pcm.shape[0]]
+      assert noise.shape[0] == pcm.shape[0]
 
     scale = np.sqrt(sig_pow(pcm) / (np.power(10, args.snr / 10) * sig_pow(noise)))
     pcm_noise = pcm + scale * noise

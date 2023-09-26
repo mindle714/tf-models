@@ -195,8 +195,15 @@ if args.ssl_fix_adapt:
           adapt_noise_idx = (adapt_noise_idx + 1) % len(noise_list)
           if sig_pow(noise) != 0: break
 
-        ns_repeat = pcm_len[0] // noise.shape[0] + int(pcm_len[0] % noise.shape[0] != 0)
-        noise = np.tile(noise, ns_repeat)[:pcm_len[0]]
+        if pcm_len[0] > noise.shape[0]:
+          ns_repeat = pcm_len[0] // noise.shape[0] + int(pcm_len[0] % noise.shape[0] != 0)
+          noise = np.tile(noise, ns_repeat)[:pcm_len[0]]
+
+        else:
+          noise_pos = np.random.randint(0, noise.shape[0] - pcm_len[0] + 1)
+          noise = noise[noise_pos:noise_pos + pcm_len[0]]
+          assert noise.shape[0] == pcm_len[0]
+
         if noise.shape[0] < pcm.shape[0]:
           noise = np.concatenate([noise,
             np.zeros(pcm.shape[0] - noise.shape[0], dtype=noise.dtype)], -1)
@@ -505,8 +512,15 @@ for idx, data in enumerate(dataset):
         noise_idx = (noise_idx + 1) % len(noise_list)
         if sig_pow(noise) != 0: break
 
-      ns_repeat = pcm_len[0] // noise.shape[0] + int(pcm_len[0] % noise.shape[0] != 0)
-      noise = np.tile(noise, ns_repeat)[:pcm_len[0]]
+      if pcm_len[0] > noise.shape[0]:
+        ns_repeat = pcm_len[0] // noise.shape[0] + int(pcm_len[0] % noise.shape[0] != 0)
+        noise = np.tile(noise, ns_repeat)[:pcm_len[0]]
+
+      else:
+        noise_pos = np.random.randint(0, noise.shape[0] - pcm_len[0] + 1)
+        noise = noise[noise_pos:noise_pos + pcm_len[0]]
+        assert noise.shape[0] == pcm_len[0]
+
       if noise.shape[0] < pcm.shape[0]:
         noise = np.concatenate([noise,
           np.zeros(pcm.shape[0] - noise.shape[0], dtype=noise.dtype)], -1)

@@ -1,12 +1,18 @@
 #!/usr/bin/bash
 
 cat /data/hejung/musan/music.list | \
-  awk 'NR%10==0{print $0" test"} NR%10!=0{print $0" train"}' > .music.list
+  awk 'NR%5==0{print $0" test"} NR%5!=0{print $0" train"}' > .music.list
 cat /data/hejung/musan/noise.list | \
-  awk 'NR%10==0{print $0" test"} NR%10!=0{print $0" train"}' > .noise.list
+  awk 'NR%5==0{print $0" test"} NR%5!=0{print $0" train"}' > .noise.list
 
 cat .music.list .noise.list | grep "\strain" \
   | awk '{print $1}' | shuf > musan_train.list
 cat .music.list .noise.list | grep "\stest" \
   | awk '{print $1}' | shuf > musan_test.list
 rm .music.list .noise.list
+
+for snr in 0 10 20 30; do
+  python3 gen_test.py \
+    --test-list /data/hejung/timit/test.wav.phone \
+    --noise-list musan_test.list --snr $snr --output timit_test/snr$snr
+done
