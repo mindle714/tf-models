@@ -1,11 +1,11 @@
 import tensorflow as tf
 
 import torch
-m = torch.load("/home/hejung/wav2vec2-base/pytorch_model.bin")
+m = torch.load("/home/hejung/hubert-base-ls960/pytorch_model.bin")
 
-from wav2vec2 import *
+from hubert import *
 
-model = wav2vec2_phone(num_class=10, use_last=False, use_layers=3, single_output=True)
+model = hubert_phone(num_class=50)
 
 import numpy as np
 pcm = np.zeros(128000)
@@ -37,27 +37,27 @@ def load_conv(prefix, e):
   else:
     e.set_weights([w.transpose(2,0).cpu().numpy()])
 
-for i, conv in enumerate(model.wav2vec2.wav2vec2.fe.conv_layers):
-  prefix = 'wav2vec2.feature_extractor.conv_layers'
+for i, conv in enumerate(model.hubert.hubert.fe.conv_layers):
+  prefix = 'feature_extractor.conv_layers'
   load_conv('{}.{}.conv'.format(prefix, i), conv.conv)
   if i == 0:
     load_norm('{}.{}.layer_norm'.format(prefix, i), conv.norm)
 
-prefix = 'wav2vec2.feature_projection'
-load_norm('{}.layer_norm'.format(prefix), model.wav2vec2.wav2vec2.fp.norm)
-load_affine('{}.projection'.format(prefix), model.wav2vec2.wav2vec2.fp.proj)
+prefix = 'feature_projection'
+load_norm('{}.layer_norm'.format(prefix), model.hubert.hubert.fp.norm)
+load_affine('{}.projection'.format(prefix), model.hubert.hubert.fp.proj)
 
-prefix = 'wav2vec2.encoder'
+prefix = 'encoder'
 w_g = m['{}.pos_conv_embed.conv.weight_g'.format(prefix)].cpu().numpy()
 w_g = np.reshape(w_g, [-1, 1, 1])
 w_v = m['{}.pos_conv_embed.conv.weight_v'.format(prefix)].transpose(2,0).cpu().numpy()
 w = tf.nn.l2_normalize(w_v, axis=[1,2]) * w_g
 b = m['{}.pos_conv_embed.conv.bias'.format(prefix)].cpu().numpy()
-model.wav2vec2.wav2vec2.enc.emb.conv.set_weights([w, b])
-load_norm('{}.layer_norm'.format(prefix), model.wav2vec2.wav2vec2.enc.norm)
+model.hubert.hubert.enc.emb.conv.set_weights([w, b])
+load_norm('{}.layer_norm'.format(prefix), model.hubert.hubert.enc.norm)
 
-for i, layer in enumerate(model.wav2vec2.wav2vec2.enc.layers):
-  prefix = 'wav2vec2.encoder.layers.{}'.format(i)
+for i, layer in enumerate(model.hubert.hubert.enc.layers):
+  prefix = 'encoder.layers.{}'.format(i)
   load_affine('{}.attention.q_proj'.format(prefix), layer.atten.q_proj)
   load_affine('{}.attention.k_proj'.format(prefix), layer.atten.k_proj)
   load_affine('{}.attention.v_proj'.format(prefix), layer.atten.v_proj)
@@ -70,15 +70,15 @@ for i, layer in enumerate(model.wav2vec2.wav2vec2.enc.layers):
   load_norm('{}.final_layer_norm'.format(prefix), layer.out_norm)
 
 '''
-load_affine('project_hid', model.wav2vec2.project_hid)
-load_affine('project_q', model.wav2vec2.project_q)
+load_affine('project_hid', model.hubert.project_hid)
+load_affine('project_q', model.hubert.project_q)
 
-load_affine('quantizer.weight_proj', model.wav2vec2.quantizer.weight_proj)
+load_affine('quantizer.weight_proj', model.hubert.quantizer.weight_proj)
 w = m['quantizer.codevectors'].cpu().numpy()
-model.wav2vec2.quantizer.codevectors.assign(w)
-w = m['wav2vec2.masked_spec_embed'].cpu().numpy()
-model.wav2vec2.wav2vec2.masked_spec_embed.assign(w)
+model.hubert.quantizer.codevectors.assign(w)
+w = m['hubert.masked_spec_embed'].cpu().numpy()
+model.hubert.hubert.masked_spec_embed.assign(w)
 '''
 
 ckpt = tf.train.Checkpoint(model)
-ckpt.write("wav2vec2_scomm.ckpt")
+ckpt.write("hubert_timit.ckpt")
