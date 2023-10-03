@@ -37,21 +37,21 @@ def load_conv(prefix, e):
   else:
     e.set_weights([w.transpose(2,0).cpu().numpy()])
 
-for i, layer in enumerate(model.data2vec.fe.conv_layers):
+for i, layer in enumerate(model.data2vec.data2vec.fe.conv_layers):
   prefix = 'data2vec_audio.feature_extractor.conv_layers'
   load_conv('{}.{}.conv'.format(prefix, i), layer.conv)
   load_norm('{}.{}.layer_norm'.format(prefix, i), layer.norm)
 
 prefix = 'data2vec_audio.feature_projection'
-load_norm('{}.layer_norm'.format(prefix), model.data2vec.fp.norm)
-load_affine('{}.projection'.format(prefix), model.data2vec.fp.proj)
+load_norm('{}.layer_norm'.format(prefix), model.data2vec.data2vec.fp.norm)
+load_affine('{}.projection'.format(prefix), model.data2vec.data2vec.fp.proj)
 
 prefix = 'data2vec_audio.encoder'
-for i, conv in enumerate(model.data2vec.enc.emb.convs):
+for i, conv in enumerate(model.data2vec.data2vec.enc.emb.convs):
   load_conv('{}.pos_conv_embed.layers.{}.conv'.format(prefix, i), conv)
-load_norm('{}.layer_norm'.format(prefix), model.data2vec.enc.norm)
+load_norm('{}.layer_norm'.format(prefix), model.data2vec.data2vec.enc.norm)
 
-for i, layer in enumerate(model.data2vec.enc.layers):
+for i, layer in enumerate(model.data2vec.data2vec.enc.layers):
   prefix = 'data2vec_audio.encoder.layers.{}'.format(i)
   load_affine('{}.attention.q_proj'.format(prefix), layer.atten.q_proj)
   load_affine('{}.attention.k_proj'.format(prefix), layer.atten.k_proj)

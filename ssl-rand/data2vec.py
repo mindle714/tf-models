@@ -78,7 +78,8 @@ class featproj(tf.keras.layers.Layer):
   
   def call(self, inputs, training=None):
     x = inputs
-    return self.dropout(self.proj(self.norm(x)))
+    x_norm = self.norm(x)
+    return self.dropout(self.proj(x_norm)), x_norm
 
 class posconvemb(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
