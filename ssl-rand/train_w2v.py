@@ -216,9 +216,9 @@ opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
 import wav2vec2
 if args.timit:
-  m = wav2vec2.wav2vec2_phone(num_class=50, use_last=True, use_layers=12)
+  m = wav2vec2.wav2vec2_phone(num_class=50, use_last=False, use_layers=3)
   if args.ssl_fix_adapt:
-    m_masked = wav2vec2.wav2vec2_phone(num_class=50, use_last=True, use_layers=12)
+    m_masked = wav2vec2.wav2vec2_phone(num_class=50, use_last=False, use_layers=3)
   is_ctc = False
 elif args.speech_command:
   m = wav2vec2.wav2vec2_phone(num_class=10, use_last=False, use_layers=3, single_output=True)

@@ -214,26 +214,26 @@ if args.ssl_fix_adapt:
 lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
-import hubert
+import data2vec
 if args.timit:
-  m = hubert.hubert_phone(num_class=50, use_last=False, use_layers=3)
+  m = data2vec.data2vec_phone(num_class=50, use_last=False, use_layers=3)
   if args.ssl_fix_adapt:
-    m_masked = hubert.hubert_phone(num_class=50, use_last=False, use_layers=3)
+    m_masked = data2vec.data2vec_phone(num_class=50, use_last=False, use_layers=3)
   is_ctc = False
 elif args.speech_command:
-  m = hubert.hubert_phone(num_class=10, use_last=False, use_layers=3, single_output=True)
+  m = data2vec.data2vec_phone(num_class=10, use_last=False, use_layers=3, single_output=True)
   if args.ssl_fix_adapt:
-    m_masked = hubert.hubert_phone(num_class=10, use_last=False, use_layers=3, single_output=True)
+    m_masked = data2vec.data2vec_phone(num_class=10, use_last=False, use_layers=3, single_output=True)
   is_ctc = False
 elif args.voxceleb:
-  m = hubert.hubert_phone(num_class=1251, use_last=False, use_layers=3, single_output=True)
+  m = data2vec.data2vec_phone(num_class=1251, use_last=False, use_layers=3, single_output=True)
   if args.ssl_fix_adapt:
-    m_masked = hubert.hubert_phone(num_class=1251, use_last=False, use_layers=3, single_output=True)
+    m_masked = data2vec.data2vec_phone(num_class=1251, use_last=False, use_layers=3, single_output=True)
   is_ctc = False
 else:
-  m = hubert.hubert_phone(use_last=False, use_layers=12)
+  m = data2vec.data2vec_phone(use_last=False, use_layers=12)
   if args.ssl_fix_adapt:
-    m_masked = hubert.hubert_phone(use_last=False, use_layers=12)
+    m_masked = data2vec.data2vec_phone(use_last=False, use_layers=12)
   is_ctc = True
 
 _in = np.zeros((args.batch_size, samp_len), dtype=np.float32)
@@ -447,16 +447,16 @@ if args.warm_start is not None:
       w_name = e.trainable_weights[0].name
       grad_mask_dict[w_name] *= (1 - w_mask)
 
-    for i, conv in enumerate(m.hubert.hubert.fe.conv_layers):
+    for i, conv in enumerate(m.data2vec.data2vec.fe.conv_layers):
       add_rand(conv.conv)
       # TODO lnorm
       
     # TODO lnorm
-    add_rand(m.hubert.hubert.fp.proj)
-    add_rand(m.hubert.hubert.enc.emb.conv)
+    add_rand(m.data2vec.data2vec.fp.proj)
+    add_rand(m.data2vec.data2vec.enc.emb.conv)
     # TODO lnorm
 
-    for i, layer in enumerate(m.hubert.hubert.enc.layers):
+    for i, layer in enumerate(m.data2vec.data2vec.enc.layers):
       add_rand(layer.atten.q_proj)
       add_rand(layer.atten.k_proj)
       add_rand(layer.atten.v_proj)
