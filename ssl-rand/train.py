@@ -30,6 +30,8 @@ parser.add_argument("--ssl-rand", type=float, required=False, default=None)
 parser.add_argument("--ssl-fix-step", type=int, required=False, default=0)
 parser.add_argument("--ssl-fix-adapt", action='store_true')
 parser.add_argument("--ssl-adapt-count", type=int, required=False, default=3)
+parser.add_argument("--ssl-preserve-zero", action='store_true')
+parser.add_argument("--ssl-lth-step", type=int, required=False, default=0)
 parser.add_argument("--snr", type=int, required=False, default=None)
 parser.add_argument("--output", type=str, required=True) 
 parser.add_argument("--timit", action='store_true')
@@ -163,6 +165,11 @@ dataset = parse_data.gen_train(tfrec_list,
   (samp_len if no_spec else spec_len), txt_len,
   no_spec=no_spec, batch_size=args.batch_size, seed=seed)
 
+if args.ssl_lth_step > 0:
+  lth_dataset = parse_data.gen_train(tfrec_list, 
+    (samp_len if no_spec else spec_len), txt_len,
+    no_spec=no_spec, batch_size=args.batch_size, seed=seed)
+
 if args.ssl_fix_adapt:
   _adapt_dataset = parse_data.gen_val(adapt_tfrec_list, 
     (samp_len if no_spec else spec_len), txt_len,
@@ -226,8 +233,12 @@ if args.ssl_fix_adapt:
   else:
     adapt_dataset = _adapt_dataset
 
+# TODO lr decay on adapt steps?
 lr = tf.Variable(args.begin_lr, trainable=False)
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
+if args.ssl_lth_step > 0:
+  lr_lth = tf.Variable(args.begin_lr, trainable=False)
+  opt_lth = tf.keras.optimizers.SGD(learning_rate=lr_lth)
 
 import tera
 if args.timit:
@@ -256,6 +267,8 @@ if args.accum_step > 1:
   _ = m(_in, ctc = is_ctc)
 
   accum_grads = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights]
+  if args.ssl_lth_step > 0:
+    accum_grads_lth = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights] 
 
 specs = [val.__spec__ for name, val in sys.modules.items() \
   if isinstance(val, types.ModuleType) and not ('_main_' in name)]
@@ -292,24 +305,35 @@ def run_step(step, spec, txt,
     weights = m.trainable_weights
     grads = tape.gradient(loss, weights)
     grads, _ = tf.clip_by_global_norm(grads, 5.)
-            
-    for idx, grad in enumerate(grads):
-      if grad is None: continue
-      if ssl_fix:
-        accum_grads[idx].assign_add(grad * grad_mask[idx])
-      else:
-        accum_grads[idx].assign_add(grad)
 
-    if not accum:
+    if args.accum_step == 1:
+      opt.apply_gradients(zip(grads, weights))
+
+    else:   
       for idx, grad in enumerate(grads):
         if grad is None: continue
-        accum_grads[idx].assign(accum_grads[idx]/args.accum_step)
 
-      opt.apply_gradients(zip(accum_grads, weights))
+        gmask = 1.
+        if grad_mask[idx] is not None: gmask = grad_mask[idx]
+
+        if ssl_fix:
+          accum_grads[idx].assign_add(grad * gmask)
+        else:
+          if args.ssl_preserve_zero:
+            accum_grads[idx].assign_add(grad * (1. - gmask))
+          else:
+            accum_grads[idx].assign_add(grad)
+
+      if not accum:
+        for idx, grad in enumerate(grads):
+          if grad is None: continue
+          accum_grads[idx].assign(accum_grads[idx]/args.accum_step)
+
+        opt.apply_gradients(zip(accum_grads, weights))
                 
-      for idx, grad in enumerate(grads):
-        if grad is None: continue
-        accum_grads[idx].assign(tf.zeros_like(grad))
+        for idx, grad in enumerate(grads):
+          if grad is None: continue
+          accum_grads[idx].assign(tf.zeros_like(grad))
 
   return loss
 
@@ -318,7 +342,10 @@ def run_adapt_step(step, spec, txt,
                    spec_len, txt_len,
                    stop_grad=False):
   for idx, w in enumerate(m.trainable_weights):
-    w_masked = w * grad_mask[idx]
+    wmask = 1.
+    if grad_mask[idx] is not None: wmask = grad_mask[idx]
+
+    w_masked = w * wmask
     # w_masked *= 1. / args.ssl_rand
     m_masked.trainable_weights[idx].assign(w_masked)
 
@@ -329,7 +356,10 @@ def run_adapt_step(step, spec, txt,
     ctc = is_ctc)
   
   for idx, w in enumerate(m.trainable_weights):
-    w_masked = w * (1. - grad_mask[idx])
+    wmask = 0.
+    if grad_mask[idx] is not None: wmask = 1. - grad_mask[idx]
+
+    w_masked = w * wmask
     # w_masked *= 1. / (1. - args.ssl_rand)
     m_masked.trainable_weights[idx].assign(w_masked)
 
@@ -340,6 +370,44 @@ def run_adapt_step(step, spec, txt,
     ctc = is_ctc)
 
   return loss_1, loss_2
+
+@tf.function
+def run_lth_step(step, spec, txt,
+                 spec_len, txt_len,
+                 accum=False, neg=True):
+  with tf.GradientTape(persistent=True) as tape, log_writer.as_default():
+    sloss = m(
+      (spec, txt, spec_len, txt_len), ssl_loss=True)
+    
+    sloss = tf.math.reduce_mean(sloss)
+    if neg: neg_sloss = -sloss
+    else: neg_sloss = sloss
+    tf.summary.scalar("sloss", sloss, step=step)
+    
+  weights = m.trainable_weights
+  grads = tape.gradient(neg_sloss, weights)
+  grads, _ = tf.clip_by_global_norm(grads, 5.)
+    
+  if args.accum_step == 1:
+    opt_lth.apply_gradients(zip(grads, weights))
+
+  else:
+    for idx, grad in enumerate(grads):
+      if grad is None: continue
+      accum_grads_lth[idx].assign_add(grad)
+
+    if not accum:
+      for idx, grad in enumerate(grads):
+        if grad is None: continue
+        accum_grads_lth[idx].assign(accum_grads_lth[idx]/args.accum_step)
+
+      opt_lth.apply_gradients(zip(accum_grads_lth, weights))
+                
+      for idx, grad in enumerate(grads):
+        if grad is None: continue
+        accum_grads_lth[idx].assign(tf.zeros_like(grad))
+
+  return sloss
 
 def run_eval_step(pcm, pcm_len):
   if not (args.timit or args.speech_command or args.voxceleb):
@@ -426,7 +494,7 @@ if args.warm_start is not None:
       opt.set_weights(opt_weight)
 
   if args.ssl_rand is not None:
-    grad_mask_dict = {e.name:tf.ones_like(e) for e in m.trainable_weights}
+    grad_mask_dict = {}#{e.name:tf.ones_like(e) for e in m.trainable_weights}
 
     if args.ssl_fix_adapt:
       _ = m_masked(_in)
@@ -435,7 +503,7 @@ if args.warm_start is not None:
       w, b = e.get_weights()
 
       w_flat = w.flatten()
-      idxs = np.argsort(np.abs(w_flat))
+      idxs = np.argsort(np.abs(w_flat)) # ascending order [0, 1, 2]
       num_mask = int(idxs.shape[0] * args.ssl_rand)
 
       idxs_mask = idxs[:num_mask]
@@ -450,9 +518,14 @@ if args.warm_start is not None:
       #w_rand = np.ones_like(w) * np.mean(w_flat[idxs_mask_inv])
       w_rand = w_mask * w #+ (1 - w_mask) * w_rand
 
-      e.set_weights([w_rand, b])
+      # TODO temporary
+      if args.ssl_lth_step == 0:
+        e.set_weights([w_rand, b])
 
       w_name = e.trainable_weights[0].name
+      if w_name not in grad_mask_dict:
+        grad_mask_dict[w_name] = tf.ones_like(w)
+
       grad_mask_dict[w_name] *= (1 - w_mask)
 
     add_rand(m.tera.tera.fe.spec_transform)
@@ -470,11 +543,90 @@ if args.warm_start is not None:
       add_rand(m.tera.tera.enc.layers[i].out)
       # TODO lnorm
 
-    grad_mask = [tf.ones_like(e) for e in m.trainable_weights]
+    #grad_mask = [tf.zeros_like(e) for e in m.trainable_weights]
+    grad_mask = [None for e in m.trainable_weights]
     for idx, w in enumerate(grad_mask):
       w_name = m.trainable_weights[idx].name
       if w_name in grad_mask_dict:
         grad_mask[idx] = grad_mask_dict[w_name]
+
+def sig_pow(e):
+  return np.mean(e**2)
+
+def add_noise(pcm, pcm_len, noise):
+  if pcm_len[0] > noise.shape[0]:
+    ns_repeat = pcm_len[0] // noise.shape[0] + int(pcm_len[0] % noise.shape[0] != 0)
+    noise = np.tile(noise, ns_repeat)[:pcm_len[0]]
+
+  else:
+    noise_pos = np.random.randint(0, noise.shape[0] - pcm_len[0] + 1)
+    noise = noise[noise_pos:noise_pos + pcm_len[0]]
+    assert noise.shape[0] == pcm_len[0]
+
+  if noise.shape[0] < pcm.shape[0]:
+    noise = np.concatenate([noise,
+      np.zeros(pcm.shape[0] - noise.shape[0], dtype=noise.dtype)], -1)
+      
+  snr = np.random.uniform(args.snr - 5, args.snr + 5)
+  pcm_pow = sig_pow(pcm[:pcm_len[0]])
+  noise_pow = sig_pow(noise[:pcm_len[0]])
+  scale = np.sqrt(pcm_pow / (np.power(10, snr / 10) * noise_pow))
+  _pcm_noise = pcm + scale * noise
+
+  return _pcm_noise
+
+if args.ssl_lth_step > 0:
+  for idx, data in enumerate(lth_dataset):
+    if idx > (2 * args.ssl_lth_step): break
+  
+    # TODO not using (idx+1) to call apply_grads in initial run_step()
+    accum = not (idx % args.accum_step == 0)
+    
+    if args.noise_list is None:
+      _in_arg = [data["spec"], data["txt"],
+                 data["spec_len"], data["txt_len"]]
+
+    else:
+      _pcm, _pcm_len = data["pcm"], data["pcm_len"]
+
+      _dict = {'pcm': _pcm, 'pcm_len': _pcm_len}
+      _spec_dict = parse_data.conv_spec(_dict)
+      spec = _spec_dict['spec']
+      spec_len = _spec_dict['spec_len']
+
+      _in_arg = [spec, data["txt"], spec_len, data["txt_len"]] 
+
+    if idx < args.ssl_lth_step:
+      loss = run_lth_step(
+        tf.cast(idx, tf.int64), *_in_arg, 
+        accum=accum, neg=True)
+
+    else:
+      if idx == args.ssl_lth_step:
+        logger.info("lth-gstep[{}] pruning occurs!".format(idx))
+        for w_idx, w in enumerate(m.trainable_weights):
+          wmask = 1.
+          if grad_mask[w_idx] is not None: wmask = 1. - grad_mask[w_idx]
+
+          w_masked = w * wmask
+          m.trainable_weights[w_idx].assign(w_masked)
+
+      loss = run_lth_step(
+        tf.cast(idx, tf.int64), *_in_arg, 
+        accum=accum, neg=False)
+        
+      for w_idx, w in enumerate(m.trainable_weights):
+        wmask = 1.
+        if grad_mask[w_idx] is not None: wmask = 1. - grad_mask[w_idx]
+
+        w_masked = w * wmask
+        m.trainable_weights[w_idx].assign(w_masked)
+  
+    log_writer.flush()
+
+    if idx % args.eval_step == 0: # include idx == 0 case
+      logger.info("lth-gstep[{}] sloss[{:.2f}] lr[{:.2e}]".format(
+        idx, loss, lr_lth.numpy()))
 
 _traced_begin = 2; _traced_cnt = 10
 noise_idx = 0
@@ -493,7 +645,7 @@ for idx, data in enumerate(dataset):
   if args.ssl_fix_adapt:
     ssl_fix = ssl_fix_adapt
   else:
-    ssl_fix = idx < args.ssl_fix_step 
+    ssl_fix = idx < args.ssl_fix_step
   
   if args.noise_list is None:
     _in_arg = [data["spec"], data["txt"],
@@ -502,34 +654,14 @@ for idx, data in enumerate(dataset):
   else:
     _pcm, _pcm_len = data["pcm"], data["pcm_len"]
 
-    def sig_pow(e):
-      return np.mean(e**2)
-
     pcm_noise = []
     for pcm, pcm_len in zip(_pcm, _pcm_len):
       while True:
         noise, _ = librosa.load(noise_list[noise_idx], sr=16000)
         noise_idx = (noise_idx + 1) % len(noise_list)
         if sig_pow(noise) != 0: break
-
-      if pcm_len[0] > noise.shape[0]:
-        ns_repeat = pcm_len[0] // noise.shape[0] + int(pcm_len[0] % noise.shape[0] != 0)
-        noise = np.tile(noise, ns_repeat)[:pcm_len[0]]
-
-      else:
-        noise_pos = np.random.randint(0, noise.shape[0] - pcm_len[0] + 1)
-        noise = noise[noise_pos:noise_pos + pcm_len[0]]
-        assert noise.shape[0] == pcm_len[0]
-
-      if noise.shape[0] < pcm.shape[0]:
-        noise = np.concatenate([noise,
-          np.zeros(pcm.shape[0] - noise.shape[0], dtype=noise.dtype)], -1)
-
-      snr = np.random.uniform(args.snr - 5, args.snr + 5)
-      pcm_pow = sig_pow(pcm[:pcm_len[0]])
-      noise_pow = sig_pow(noise[:pcm_len[0]])
-      scale = np.sqrt(pcm_pow / (np.power(10, snr / 10) * noise_pow))
-      _pcm_noise = pcm + scale * noise
+      
+      _pcm_noise = add_noise(pcm, pcm_len, noise)
       pcm_noise.append(_pcm_noise)
 
     _dict = {'pcm': np.array(pcm_noise), 'pcm_len': _pcm_len}
@@ -539,12 +671,16 @@ for idx, data in enumerate(dataset):
 
     _in_arg = [spec, data["txt"], spec_len, data["txt_len"]] 
 
+  def do_step():
+    loss = run_step(
+      tf.cast(idx, tf.int64), *_in_arg,
+      accum=accum, stop_grad=args.stop_grad, ssl_fix=ssl_fix)
+    return loss
+
   if args.profile:
     if idx > (init_epoch + _traced_begin) and _traced_cnt > 0:
       with tf.profiler.experimental.Trace('train', step_num=idx, _r=1):
-        loss = run_step(
-          tf.cast(idx, tf.int64), *_in_arg,
-          accum=accum, stop_grad=args.stop_grad, ssl_fix=ssl_fix)
+        loss = do_step()
       _traced_cnt -= 1
 
     elif idx > (init_epoch + _traced_begin) and  _traced_cnt == 0:
@@ -552,14 +688,10 @@ for idx, data in enumerate(dataset):
       _traced_cnt -= 1
 
     else:
-        loss = run_step(
-          tf.cast(idx, tf.int64), *_in_arg,
-          accum=accum, stop_grad=args.stop_grad, ssl_fix=ssl_fix)
+      loss = do_step()
 
   else:
-    loss = run_step(
-      tf.cast(idx, tf.int64), *_in_arg,
-      accum=accum, stop_grad=args.stop_grad, ssl_fix=ssl_fix)
+    loss = do_step()
 
   log_writer.flush()
   tf.summary.scalar("lr", lr, step=idx)
@@ -579,7 +711,7 @@ for idx, data in enumerate(dataset):
       loss_1 = np.mean(loss_1s); loss_2 = np.mean(loss_2s)
       logger.info("gstep[{}] loss_1[{}] loss_2[{}]".format(idx, loss_1, loss_2))
 
-      if ssl_val_min is None or ssl_val_min > loss_1:
+      if ssl_val_min is None or (ssl_val_min > loss_1 and loss_1 > loss_2):
         ssl_val_min = loss_1
         ssl_val_cnt = 0
 
@@ -593,6 +725,9 @@ for idx, data in enumerate(dataset):
     if args.accum_step == 1 or not accum:
       # follow tf.keras.optimizers.schedules.ExponentialDecay
       lr.assign(args.begin_lr * args.lr_decay_rate**(idx/args.lr_decay_step))
+      # TODO lr decay on lth steps?
+      if args.ssl_lth_step > 0:
+        lr_lth.assign(args.begin_lr * args.lr_decay_rate**(idx/args.lr_decay_step))
 
   elif idx > init_epoch and idx % args.val_step == 0:
     val_loss = 0; num_val = 0
