@@ -24,19 +24,39 @@ _ = model((_in, _in_len))
 emb = state_dict['shared/embedding']
 model.embed.assign(emb)
 
-prefix = 'encoder/block_000/layer_000'
-scale = state_dict['{}/layer_norm/scale'.format(prefix)]
-model.layer_norm.scale.assign(scale)
-
-q = state_dict['{}/SelfAttention/q'.format(prefix)]
-model.atten.q.assign(q)
-k = state_dict['{}/SelfAttention/k'.format(prefix)]
-model.atten.k.set_weights([k])
-v = state_dict['{}/SelfAttention/v'.format(prefix)]
-model.atten.v.set_weights([v])
-
-rel_bias = state_dict['{}/SelfAttention/relative_attention_bias'.format(prefix)]
+rel_bias = state_dict['encoder/block_000/layer_000/SelfAttention/relative_attention_bias']
 model.rel_bias.assign(rel_bias)
+
+assert len(model.sublayers) == 12
+for idx in range(len(model.sublayers) // 2):
+  prefix = 'encoder/block_{:03d}/layer_000'.format(idx)
+  sublayer = model.sublayers[2 * idx]
+
+  scale = state_dict['{}/layer_norm/scale'.format(prefix)]
+  sublayer.layer_norm.scale.assign(scale)
+
+  q = state_dict['{}/SelfAttention/q'.format(prefix)]
+  sublayer.layer.q.assign(q)
+  k = state_dict['{}/SelfAttention/k'.format(prefix)]
+  sublayer.layer.k.set_weights([k])
+  v = state_dict['{}/SelfAttention/v'.format(prefix)]
+  sublayer.layer.v.set_weights([v])
+  out = state_dict['{}/SelfAttention/o'.format(prefix)]
+  sublayer.layer.out.set_weights([out])
+
+  prefix = 'encoder/block_{:03d}/layer_001'.format(idx)
+  sublayer = model.sublayers[2 * idx + 1]
+
+  scale = state_dict['{}/layer_norm/scale'.format(prefix)]
+  sublayer.layer_norm.scale.assign(scale)
+
+  wi = state_dict['{}/DenseReluDense/wi/kernel'.format(prefix)]
+  wo = state_dict['{}/DenseReluDense/wo/kernel'.format(prefix)]
+  sublayer.layer.wi.set_weights([wi])
+  sublayer.layer.wo.set_weights([wo])
+  
+scale = state_dict['encoder/final_layer_norm/scale']
+model.layer_norm.scale.assign(scale)
 
 out = model((_in, _in_len))
 print(out)
