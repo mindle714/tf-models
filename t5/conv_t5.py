@@ -127,8 +127,8 @@ for idx in range(len(model.decoder.sublayers) // 3):
   sublayer.layer.wi.set_weights([wi])
   sublayer.layer.wo.set_weights([wo])
   
-scale = state_dict['encoder/final_layer_norm/scale']
-model.encoder.layer_norm.scale.assign(scale)
+scale = state_dict['decoder/final_layer_norm/scale']
+model.decoder.layer_norm.scale.assign(scale)
 
 out = model((_in, _in_len, _out, _out_len))
 print(out)

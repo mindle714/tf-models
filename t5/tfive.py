@@ -47,8 +47,12 @@ class sublayer(tf.keras.layers.Layer):
   def call(self, inputs, training=None):
     rel_bias = None
     x_len = None
+    enc_out = None
 
-    if isinstance(inputs, tuple) and len(inputs) == 3:
+    if isinstance(inputs, tuple) and len(inputs) == 4:
+      x, x_len, rel_bias, enc_out = inputs
+    
+    elif isinstance(inputs, tuple) and len(inputs) == 3:
       x, x_len, rel_bias = inputs
     
     elif isinstance(inputs, tuple) and len(inputs) == 2:
@@ -66,6 +70,8 @@ class sublayer(tf.keras.layers.Layer):
 
     if isinstance(self.layer, attention):
       x = self.layer((x, rel_bias))
+    elif isinstance(self.layer, encdec_attention):
+      x = self.layer((x, rel_bias, enc_out))
     else:
       x = self.layer(x)
 
@@ -151,16 +157,17 @@ class encdec_attention(tf.keras.layers.Layer):
     self.out = tf.keras.layers.Dense(512, use_bias=False, name="out")
 
   def call(self, inputs, training=None):
-    if isinstance(inputs, tuple) and len(inputs) == 2:
-      x, rel_bias = inputs
+    if isinstance(inputs, tuple) and len(inputs) == 3:
+      x, rel_bias, enc_out = inputs
 
     else:
       x = inputs
       rel_bias = None
+      enc_out = x
 
     q = tf.linalg.matmul(x, self.q)
-    k = self.k(x)
-    v = self.v(x)
+    k = self.k(enc_out)
+    v = self.v(enc_out)
     
     def reshape(e):
       e = tf.reshape(e,
@@ -272,23 +279,44 @@ class t5_decoder(tf.keras.layers.Layer):
     self.layer_norm = rms_norm()
   
   def call(self, inputs, training=None):
-    if isinstance(inputs, tuple) and len(inputs) == 2:
-      x, x_len = inputs
+    if isinstance(inputs, tuple) and len(inputs) == 4:
+      x, x_len, enc_out, enc_len = inputs
 
     else:
       x = inputs
       x_len = None
+      enc_out = None
+      enc_len = None
 
     rel_pos = tf.reshape(tf.range(32), (-1, 1)) - tf.reshape(tf.range(32), (1, -1))
     rp_bucket = rel_pos_bucket(rel_pos)
-    rel_bias = tf.gather(self.rel_bias, rp_bucket, axis=1)
+    mask_rel_bias = tf.gather(self.rel_bias, rp_bucket, axis=1)
     if x_len is not None:
       mask = tf.cast(tf.sequence_mask(x_len, tf.shape(x)[1]), x.dtype)
-      rel_bias += (1. - tf.expand_dims(mask, -1)) * (-1e9) 
+      mask_rel_bias += (1. - tf.expand_dims(mask, -1)) * (-1e9)
+
+      # lower triangular for decoder
+      lower_mask = tf.linalg.band_part(tf.ones_like(mask_rel_bias), 0, -1)
+      lower_mask = (1. - lower_mask) * (-1e9)
+      mask_rel_bias += lower_mask
+    
+#    rel_pos = tf.reshape(tf.range(128), (-1, 1)) - tf.reshape(tf.range(32), (1, -1))
+#    rp_bucket = rel_pos_bucket(rel_pos)
+#    enc_rel_bias = tf.gather(self.rel_bias, rp_bucket, axis=1)
+#    if x_len is not None:
+#      mask = tf.cast(tf.sequence_mask(x_len, tf.shape(enc_rel_bias)[-1]), x.dtype)
+#      enc_rel_bias += (1. - tf.expand_dims(mask, 1)) * (-1e9)
+
+    enc_rel_bias = None
+    if enc_len is not None:
+      mask = tf.cast(tf.sequence_mask(enc_len, tf.shape(enc_out)[1]), x.dtype)
+      enc_rel_bias = (1. - tf.expand_dims(mask, -1)) * (-1e9)
 
     for sublayer in self.sublayers:
       if sublayer.layer_cls is attention:
-        x = sublayer((x, x_len, rel_bias))
+        x = sublayer((x, x_len, mask_rel_bias))
+      elif sublayer.layer_cls is encdec_attention:
+        x = sublayer((x, x_len, enc_rel_bias, enc_out))
       else:
         x = sublayer((x, x_len))
 
@@ -322,6 +350,9 @@ class t5(tf.keras.layers.Layer):
 
     if y is not None:
       y = tf.gather(self.embed, y)
-      y = self.decoder((y, y_len))
+      y = self.decoder((y, y_len, x, x_len))
 
-    return x
+      y *= tf.cast(tf.shape(y)[-1], y.dtype) ** (-0.5)
+      y = tf.linalg.matmul(y, self.embed, transpose_b=True) 
+
+    return y
