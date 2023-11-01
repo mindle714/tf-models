@@ -32,7 +32,6 @@ parser.add_argument("--timit", action='store_true')
 parser.add_argument("--speech-command", action='store_true')
 parser.add_argument("--voxceleb", action='store_true')
 parser.add_argument("--warm-start", type=str, required=False, default=None)
-parser.add_argument("--stop-grad", action='store_true')
 parser.add_argument("--from-init", action='store_true')
 parser.add_argument("--profile", action='store_true')
 args = parser.parse_args()
@@ -209,13 +208,11 @@ if args.profile:
 @tf.function
 def run_step(step, pcm, txt,
              samp_len, txt_len,
-             training=True, accum=False,
-             stop_grad=False):
+             training=True, accum=False):
   with tf.GradientTape(persistent=True) as tape, log_writer.as_default():
     loss = m(
       (pcm, txt, samp_len, txt_len),
       training = training, 
-      stop_grad = stop_grad,
       ctc = is_ctc)
 
     loss = tf.math.reduce_mean(loss)
@@ -385,7 +382,7 @@ for idx, data in enumerate(dataset):
   def do_step():
     loss = run_step(
       tf.cast(idx, tf.int64), *_in_arg,
-      accum=accum, stop_grad=args.stop_grad)
+      accum=accum)
     return loss
 
   if args.profile:

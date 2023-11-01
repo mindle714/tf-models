@@ -13,7 +13,7 @@ import torch
 m = torch.load("/home/hejung/wav2vec2-base/pytorch_model.bin")
 
 import model
-_model = model.wav2vec2_t5_phone()
+_model = model.wav2vec2_t5_phone(num_class=50)
 
 import numpy as np
 pcm = np.zeros(16000)

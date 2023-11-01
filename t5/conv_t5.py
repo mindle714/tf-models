@@ -14,30 +14,25 @@ model = tfive.t5()
 
 import numpy as np
 #_in = np.array([22377, 822, 10, 213, 19, 8, 10283, 13767, 1069, 58, 1])
-'''
-_in = np.array([22377, 822, 10, 113, 751, 8, 296, 3, 7, 22563, 49, 10183, 
-    16, 164, 1412, 58, 1, 22377, 822, 10, 2170, 30, 16022,
-    1914, 10247, 6, 125, 19, 8, 244, 4350, 13, 3, 17, 208, 31, 7, 2472, 3, 
-    18118, 6, 113, 5330, 263, 112, 10393, 57, 16069, 30, 8, 12366, 9, 107, 
-    1369, 89, 60, 63, 504, 58, 1, 22377, 822, 10, 125, 19, 8, 564, 13, 8, 
-    1227, 9, 25863, 3946, 16, 8438, 1273, 84, 19, 2681, 147, 3, 9, 2068, 
-    3, 29, 31, 12, 1835, 35, 165, 30637, 6, 3, 15, 5, 122, 5, 16, 8, 1448, 
-    3, 31, 7, 15, 2, 127, 58, 1])
-'''
 _in = np.array([22377, 822, 10, 113, 1944, 528, 7, 7, 2617, 16, 388, 
     45, 2983, 63, 4033, 58, 1]) 
-_in_len = np.array([_in.shape[0]])
+_in_len = np.array([_in.shape[0]]).reshape((-1, 1))
 _in = np.concatenate([_in, np.zeros(128 - _in.shape[0], dtype=_in.dtype)])
 _in = _in.reshape((1, -1))
 assert _in.shape == (1, 128)
 
 _out = np.array([0, 108, 3496, 26, 3, 189, 127, 6992]) 
-_out_len = np.array([_out.shape[0]])
+_out_len = np.array([_out.shape[0]]).reshape((-1, 1))
 _out = np.concatenate([_out, np.zeros(32 - _out.shape[0], dtype=_out.dtype)])
 _out = _out.reshape((1, -1))
 assert _out.shape == (1, 32)
 
-_ = model((_in, _in_len, _out, _out_len))
+_in = np.tile(_in, [2, 1])
+_in_len = np.tile(_in_len, [2, 1])
+_out = np.tile(_out, [2, 1])
+_out_len = np.tile(_out_len, [2, 1])
+
+_ = model((_in, _out, _in_len, _out_len))
 
 emb = state_dict['shared/embedding']
 model.embed.assign(emb)
@@ -130,5 +125,21 @@ for idx in range(len(model.decoder.sublayers) // 3):
 scale = state_dict['decoder/final_layer_norm/scale']
 model.decoder.layer_norm.scale.assign(scale)
 
-out = model((_in, _in_len, _out, _out_len))
+out = model((_in, _out, _in_len, _out_len))
 print(out)
+'''
+tf.Tensor(
+[[[-21.167686   -9.563934  -14.535332  ... -41.624435  -41.80423
+   -41.711132 ]
+  [-32.608505   -8.9398985 -10.864493  ... -46.030415  -46.15585
+   -46.02235  ]
+  [-28.371763   -2.1518     -7.616701  ... -41.80992   -41.862537
+   -41.853703 ]
+  ...
+  [ -6.0878167  -4.0208836  -7.0202265 ... -39.149033  -39.167557
+   -39.121254 ]
+  [ -6.1926956  -4.054224   -7.0777802 ... -39.367405  -39.385197
+   -39.337067 ]
+  [ -6.1926956  -4.054224   -7.0777802 ... -39.367405  -39.385197
+   -39.337067 ]]], shape=(1, 32, 32128), dtype=float32)
+'''

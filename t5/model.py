@@ -29,6 +29,7 @@ class wav2vec2_t5(tf.keras.layers.Layer):
 
     else:
       x_len = mask.get_feat_extract_output_length(_x_len)
+      x_len = tf.squeeze(x_len, -1)
 
     x = self.fe(tf_expd(x, -1))
     _, x_feat = self.fp(x)

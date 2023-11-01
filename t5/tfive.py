@@ -255,8 +255,14 @@ class t5_encoder(tf.keras.layers.Layer):
       x_len = None
 
     rel_bias = tf.gather(self.rel_bias, self.rp_bucket, axis=1)
+    rel_bias = tf.tile(rel_bias, (tf.shape(x)[0], 1, 1)) 
+
     if x_len is not None:
       mask = tf.cast(tf.sequence_mask(x_len, tf.shape(x)[1]), x.dtype)
+      mask = tf.expand_dims(mask, 1)
+      mask = tf.tile(mask, (1, 8, 1))
+      mask = tf.reshape(mask, [-1, tf.shape(mask)[-1]])
+
       rel_bias += (1. - tf.expand_dims(mask, -1)) * (-1e9) 
 
     for sublayer in self.sublayers:
@@ -284,6 +290,9 @@ class t5_decoder(tf.keras.layers.Layer):
       sublayer(attention), sublayer(encdec_attention), sublayer(denserelu),
     ]
     self.layer_norm = rms_norm()
+
+    self.rel_pos = tf.reshape(tf.range(32), (-1, 1)) - tf.reshape(tf.range(32), (1, -1))
+    self.rp_bucket = rel_pos_bucket(self.rel_pos)
   
   def call(self, inputs, training=None):
     if isinstance(inputs, tuple) and len(inputs) == 4:
@@ -295,11 +304,15 @@ class t5_decoder(tf.keras.layers.Layer):
       enc_out = None
       enc_len = None
 
-    rel_pos = tf.reshape(tf.range(32), (-1, 1)) - tf.reshape(tf.range(32), (1, -1))
-    rp_bucket = rel_pos_bucket(rel_pos)
-    mask_rel_bias = tf.gather(self.rel_bias, rp_bucket, axis=1)
+    mask_rel_bias = tf.gather(self.rel_bias, self.rp_bucket, axis=1)
+    mask_rel_bias = tf.tile(mask_rel_bias, (tf.shape(x)[0], 1, 1))
+
     if x_len is not None:
       mask = tf.cast(tf.sequence_mask(x_len, tf.shape(x)[1]), x.dtype)
+      mask = tf.expand_dims(mask, 1)
+      mask = tf.tile(mask, (1, 8, 1))
+      mask = tf.reshape(mask, [-1, tf.shape(mask)[-1]])
+
       mask_rel_bias += (1. - tf.expand_dims(mask, -1)) * (-1e9)
 
       # lower triangular for decoder
@@ -310,6 +323,10 @@ class t5_decoder(tf.keras.layers.Layer):
     enc_rel_bias = None
     if enc_len is not None:
       mask = tf.cast(tf.sequence_mask(enc_len, tf.shape(enc_out)[1]), x.dtype)
+      mask = tf.expand_dims(mask, 1)
+      mask = tf.tile(mask, (1, 8, 1))
+      mask = tf.reshape(mask, [-1, tf.shape(mask)[-1]])
+
       enc_rel_bias = (1. - tf.expand_dims(mask, -1)) * (-1e9)
 
     for sublayer in self.sublayers:
@@ -334,10 +351,13 @@ class t5(tf.keras.layers.Layer):
   
   def call(self, inputs, training=None):
     if isinstance(inputs, tuple) and len(inputs) == 4:
-      x, x_len, y, y_len = inputs
+      x, y, x_len, y_len = inputs
+      x_len = tf.squeeze(x_len, -1)
+      y_len = tf.squeeze(y_len, -1)
 
     elif isinstance(inputs, tuple) and len(inputs) == 2:
       x, x_len = inputs
+      x_len = tf.squeeze(x_len, -1)
       y = None; y_len = None
 
     else:
