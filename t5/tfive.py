@@ -236,15 +236,6 @@ class t5_encoder(tf.keras.layers.Layer):
       sublayer(attention), sublayer(denserelu),
     ]
     self.layer_norm = rms_norm()
-    
-    if isinstance(input_shape, tuple) and len(input_shape) == 2:
-      in_len = input_shape[0][1]
-
-    else:
-      in_len = input_shape[1]
-
-    self.rel_pos = tf.reshape(tf.range(in_len), (-1, 1)) - tf.reshape(tf.range(in_len), (1, -1))
-    self.rp_bucket = rel_pos_bucket(self.rel_pos)
   
   def call(self, inputs, training=None):
     if isinstance(inputs, tuple) and len(inputs) == 2:
@@ -254,7 +245,12 @@ class t5_encoder(tf.keras.layers.Layer):
       x = inputs
       x_len = None
 
-    rel_bias = tf.gather(self.rel_bias, self.rp_bucket, axis=1)
+    x_max_len = tf.shape(x)[1]
+    rel_pos = tf.reshape(tf.range(x_max_len), (-1, 1)) - \
+            tf.reshape(tf.range(x_max_len), (1, -1))
+    rp_bucket = rel_pos_bucket(rel_pos)
+
+    rel_bias = tf.gather(self.rel_bias, rp_bucket, axis=1)
     rel_bias = tf.tile(rel_bias, (tf.shape(x)[0], 1, 1)) 
 
     if x_len is not None:
@@ -290,9 +286,6 @@ class t5_decoder(tf.keras.layers.Layer):
       sublayer(attention), sublayer(encdec_attention), sublayer(denserelu),
     ]
     self.layer_norm = rms_norm()
-
-    self.rel_pos = tf.reshape(tf.range(32), (-1, 1)) - tf.reshape(tf.range(32), (1, -1))
-    self.rp_bucket = rel_pos_bucket(self.rel_pos)
   
   def call(self, inputs, training=None):
     if isinstance(inputs, tuple) and len(inputs) == 4:
@@ -304,7 +297,12 @@ class t5_decoder(tf.keras.layers.Layer):
       enc_out = None
       enc_len = None
 
-    mask_rel_bias = tf.gather(self.rel_bias, self.rp_bucket, axis=1)
+    x_max_len = tf.shape(x)[1]
+    rel_pos = tf.reshape(tf.range(x_max_len), (-1, 1)) - \
+            tf.reshape(tf.range(x_max_len), (1, -1))
+    rp_bucket = rel_pos_bucket(rel_pos)
+
+    mask_rel_bias = tf.gather(self.rel_bias, rp_bucket, axis=1)
     mask_rel_bias = tf.tile(mask_rel_bias, (tf.shape(x)[0], 1, 1))
 
     if x_len is not None:

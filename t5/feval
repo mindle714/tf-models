@@ -1,0 +1,99 @@
+#!/usr/bin/bash
+
+USAGE="Usage: $0 -e <epoch> -p <prefix> [-s] [-v]"
+EXAMPLE="($0 -e 10000)"
+
+unset epochs; unset prefs; max=false;
+while getopts ":e:p:m" opt; do
+  case $opt in
+    e) epochs+=("$OPTARG") ;;
+    p) prefs+=("$OPTARG") ;;
+    m) max=true ;;
+    ?) echo "$USAGE"; echo "$EXAMPLE"; exit 2 ;;
+  esac
+done
+
+evaldir=results
+suf_mem=""
+
+print_epoch() {
+  epoch="$1"
+  pref="$2"
+  kepoch="$(echo $epoch | sed 's/000$/k/g')"
+
+  for eval in ${evaldir}/${pref}*-${epoch}.eval; do
+    # if prefix does not exist
+    if [ "$eval" == "${evaldir}/${pref}*-${epoch}.eval" ]; then return; fi
+
+    suf="$(echo $eval | sed 's/\.eval//g' | cut -d- -f1 | rev | cut -d/ -f1 | rev)";
+    tm="$(stat -c %y $eval | cut -d. -f1 | sed 's/202.-//g' | cut -d: -f-2)"
+    pref1=""
+
+    if ! tail -n1 $eval | grep -q final; then
+      len="$(wc -l $eval | awk '{print $1}')"
+      score1="$(cat $eval | awk '{s+=$1} END{print s/NR}')"
+      score1="$(echo $score1 | awk '{printf "%.3f", 100*(1-$1)}')"
+      pref1="CONT ($len)"
+      if ! $max; then
+        printf "%11s %40s\t%.3f\n" "$pref1" "$suf($kepoch)" $score1
+      fi
+      continue
+    else
+      pref1="$tm"
+      score1="$(tail -n1 $eval | grep final | sed 's/final: //g' \
+        | awk '{printf "%.3f", 100*(1-$1)}')"
+    fi
+
+    if $max; then
+      if $(echo $suf_mem | grep -q ">$suf(_[0-9k]*_)(([0-9.]*))<"); then
+        prev_score=$(echo $suf_mem | grep -o ">$suf(_[0-9k]*_)(([0-9.]*))<" \
+          | grep -o "(([0-9.]*))" | tr -d ')(')
+        isbigger="$(echo $prev_score $score1 | awk '{print ($1<$2)}')"
+        if [ $isbigger == 1 ]; then
+          suf_mem="$(echo $suf_mem | sed "s/>$suf(_[0-9k]*_)(([0-9.]*))</>$suf(_${kepoch}_)(($score1))</g")"
+        fi
+      else
+        suf_mem="$suf_mem >$suf(_${kepoch}_)(($score1))<"
+      fi
+    else
+      printf "%11s %40s\t%.3f\n" "$pref1" "$suf($kepoch)" $score1
+    fi
+  done
+}
+
+if [ -z ${epochs+x} ]; then
+  if [ -z ${prefs+x} ]; then
+    epochs="$(ls ${evaldir}/*.eval 2> /dev/null | grep -o "\-[0-9]*\.eval" | cut -d- -f2 | cut -d. -f1 | sort -k1 -n | uniq)"
+    for epoch in $epochs; do
+      print_epoch $epoch ""
+    done
+
+  else
+    for pref in "${prefs[@]}"; do
+      epochs="$(ls ${evaldir}/${pref}*.eval 2> /dev/null | grep -o "\-[0-9]*\.eval" | cut -d- -f2 | cut -d. -f1 | sort -k1 -n | uniq)"
+      for epoch in $epochs; do
+        print_epoch $epoch "$pref"
+      done
+    done
+  fi
+
+else
+  if [ -z ${prefs+x} ]; then
+    for epoch in "${epochs[@]}"; do
+      print_epoch $epoch ""
+    done
+
+  else
+    for pref in "${prefs[@]}"; do
+      for epoch in "${epochs[@]}"; do
+        print_epoch $epoch "$pref"
+      done
+    done
+  fi
+fi
+
+if $max; then
+  echo $suf_mem | grep -o ">[^()]*(_[0-9k]*_)(([0-9.]*))<" | \
+    tr -d '><' | sed 's/(_/(/g' | sed 's/_)/)/g' | sed 's/((/ /g' | sed 's/))/ /g' | \
+    awk '{printf "%40s\t%.3f\n", $1, $2}'
+fi
