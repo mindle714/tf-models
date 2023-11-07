@@ -1,0 +1,26 @@
+#!/bin/bash
+
+for snr in 20; do
+#  python3 gen_data.py \
+#    --train-list /data/hejung/timit/train_w2v.wav.phone \
+#    --output timit_w2v_snr${snr}_v4 --samp-len 128000 --text-len 399 \
+#    --no-spec --noise-list musan_set/snr${snr}/noise.list
+
+#  python3 gen_data.py \
+#    --train-list /data/hejung/timit/train_w2v.wav.phone \
+#    --output timit_w2v_snr${snr}_v4_jb --samp-len 128000 --text-len 399 \
+#    --no-spec --noise-list musan_set/snr${snr}/noise.list --apply-jointb
+
+  python3 gen_data.py \
+    --train-list /data/hejung/timit/train_w2v.wav.phone \
+    --output timit_w2v_snr${snr}_v7 --samp-len 128000 --text-len 399 \
+    --no-spec --noise-list musan_set_v2/snr0/noise.list \
+    --min-snr ${snr} --max-snr ${snr} --ignore-prev-snr
+
+  python3 gen_data.py \
+    --train-list /data/hejung/timit/train_w2v.wav.phone \
+    --output timit_w2v_snr${snr}_v7_gd --samp-len 128000 --text-len 399 \
+    --no-spec --noise-list musan_set_v2/snr0/noise.list \
+    --apply-guide --guide-nfft 2048 --guide-r 5 \
+    --min-snr ${snr} --max-snr ${snr} --ignore-prev-snr
+done

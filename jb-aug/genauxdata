@@ -1,0 +1,8 @@
+#!/bin/bash
+
+for snr in -10; do
+  python3 gen_aux_list.py \
+    --train-list /data/hejung/timit/train_w2v.wav.phone \
+    --noise-list musan_train.list --min-snr ${snr} --max-snr ${snr} \
+    --output musan_set_v2/snr${snr}
+done

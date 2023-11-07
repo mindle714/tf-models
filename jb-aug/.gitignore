@@ -5,3 +5,6 @@ exps/
 results/
 *.wav
 wav2vec2_timit.ckpt.*
+tmp/
+test/
+musan_set_v2/
