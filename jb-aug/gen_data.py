@@ -12,13 +12,22 @@ parser.add_argument("--crop-middle", action='store_true')
 parser.add_argument("--noise-list", type=str, required=False, default=None) 
 parser.add_argument("--min-snr", type=int, required=False, default=10)
 parser.add_argument("--max-snr", type=int, required=False, default=10)
+parser.add_argument("--ignore-prev-snr", action='store_true')
+
 parser.add_argument("--apply-jointb", action='store_true') 
+parser.add_argument("--reverse-jointb", action='store_true') 
+parser.add_argument("--apply-guide", action='store_true') 
+parser.add_argument("--guide-r", type=int, required=False, default=10)
+parser.add_argument("--guide-nfft", type=int, required=False, default=512)
 
 parser.add_argument("--output", type=str, required=True) 
 args = parser.parse_args()
 
-if args.apply_jointb:
-  import jointbilatFil
+if args.apply_jointb or args.apply_guide:
+  if args.apply_jointb:
+    import jointbilatFil
+  else:
+    import gf
 
   def magnitude(e): return np.abs(e)
   def phase(e): return np.arctan2(e.imag, e.real)
@@ -52,11 +61,13 @@ else:
   if len(noise_list) > len(train_list):
     random.shuffle(noise_list)
     noise_list = noise_list[:len(train_list)]
-  else:
+  elif len(noise_list) < len(train_list):
     rep = len(train_list) // len(noise_list)
     noise_list = noise_list * (rep + 1)
     random.shuffle(noise_list)
     noise_list = noise_list[:len(train_list)]
+  else:
+    print("Same noise, train list; use as it is")
 
   assert len(train_list) == len(noise_list)
 
@@ -74,6 +85,7 @@ import warnings
 import tensorflow as tf
 import multiprocessing
 import numpy as np
+np.seterr(all='raise')
 import copy
 import librosa
 import tqdm
@@ -89,22 +101,31 @@ def get_feats(pcm, txt, n):
       assert pcm.shape[0] == args.samp_len
   
   if n is not None:
-    if args.apply_jointb:
-      f_orig = librosa.stft(pcm)
+    if len(n.split()) > 1:
+      _snr_db, n = n.split()
+
+    if not args.ignore_prev_snr:
+      snr_db = float(_snr_db)
+
+    else:
+      snr_db = np.random.uniform(args.min_snr, args.max_snr)
+
+    if args.apply_jointb or args.apply_guide:
+      f_orig = librosa.stft(pcm, n_fft=args.guide_nfft, hop_length=160)
       m_orig = magnitude(f_orig)
       m_orig = librosa.amplitude_to_db(m_orig)
 
-    snr_db = np.random.uniform(args.min_snr, args.max_snr)
     noise, _ = librosa.load(n, sr=args.samp_rate)
 
     if pcm.shape[0] > noise.shape[0]:
       ns_repeat = pcm.shape[0] // noise.shape[0] + int(pcm.shape[0] % noise.shape[0] != 0)
       noise = np.tile(noise, ns_repeat)[:pcm.shape[0]]
 
-    else:
+    elif pcm.shape[0] < noise.shape[0]:
       noise_pos = np.random.randint(0, noise.shape[0] - pcm.shape[0] + 1)
       noise = noise[noise_pos:noise_pos + pcm.shape[0]]
-      assert noise.shape[0] == pcm.shape[0]
+
+    assert noise.shape[0] == pcm.shape[0]
 
     pcm_en = np.mean(pcm**2)
     noise_en = np.maximum(np.mean(noise**2), 1e-9)
@@ -116,16 +137,56 @@ def get_feats(pcm, txt, n):
     pcm *= np.sqrt(pcm_en / noise_pcm_en)
 
     if args.apply_jointb:
-      f_ns = librosa.stft(pcm)
+      f_ns = librosa.stft(pcm, n_fft=args.guide_nfft, hop_length=160)
       m_ns = magnitude(f_ns); ph_ns = phase(f_ns)
       m_ns = librosa.amplitude_to_db(m_ns)
 
-      m_ns_new = jointbilatFil.jointBilateralFilter(
-        np.expand_dims(m_ns, -1), np.expand_dims(m_orig, -1))
+      if not args.reverse_jointb:
+        m_ns_new = jointbilatFil.jointBilateralFilter(
+          np.expand_dims(m_ns, -1), np.expand_dims(m_orig, -1))
+      else:
+        m_ns_new = jointbilatFil.jointBilateralFilter(
+          np.expand_dims(m_orig, -1), np.expand_dims(m_ns, -1))
+
       m_ns_new = np.squeeze(m_ns_new, -1)
       m_ns_new = librosa.db_to_amplitude(m_ns_new)
 
-      pcm = librosa.istft(polar(m_ns_new, ph_ns), length=pcm.shape[0])
+      pcm = librosa.istft(polar(m_ns_new, ph_ns), length=pcm.shape[0], 
+              n_fft=args.guide_nfft, hop_length=160)
+      noise_pcm_en = np.maximum(np.mean(pcm**2), 1e-9)
+      pcm *= np.sqrt(pcm_en / noise_pcm_en)
+
+    elif args.apply_guide:
+      orig_pcm = pcm
+
+      try:
+        f_ns = librosa.stft(pcm, n_fft=args.guide_nfft, hop_length=160)
+        m_ns = magnitude(f_ns); ph_ns = phase(f_ns)
+        m_ns = librosa.amplitude_to_db(m_ns)
+
+        pad_len = 0
+        if m_ns.shape[1] < (2*args.guide_r):
+          pad_len = ((2*args.guide_r) - m_ns.shape[1]) // 2 + 1
+          orig_shape = m_ns.shape
+          m_orig = np.pad(m_orig, pad_len)
+          m_ns = np.pad(m_ns, pad_len)
+
+        m_ns_new = gf.guided_filter(m_orig, m_ns, args.guide_r, 0.05)
+        m_ns_new = np.clip(m_ns_new, np.min(m_ns), np.max(m_ns))
+        m_ns_new = librosa.db_to_amplitude(m_ns_new)
+
+        if pad_len > 0:
+          m_ns_new = m_ns_new[pad_len:-pad_len, pad_len:-pad_len]
+          assert m_ns_new.shape == orig_shape
+
+        pcm = librosa.istft(polar(m_ns_new, ph_ns), length=pcm.shape[0],
+                n_fft=args.guide_nfft, hop_length=160)
+        noise_pcm_en = np.maximum(np.mean(pcm**2), 1e-9)
+        pcm *= np.sqrt(pcm_en / noise_pcm_en)
+
+      except:
+        print("Error occurred and rewind to original")
+        pcm = orig_pcm
 
   def pad(_in, _len, val):
     return np.concatenate([_in,
