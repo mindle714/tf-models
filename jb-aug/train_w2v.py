@@ -13,8 +13,8 @@ tf.random.set_seed(seed)
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--tfrec", type=str, required=True) 
+parser.add_argument("--tfrec2", type=str, required=False, default=None) 
 parser.add_argument("--val-tfrec", type=str, required=False, default=None)
-parser.add_argument("--eval-list", type=str, required=False, default=None) 
 parser.add_argument("--batch-size", type=int, required=False, default=4) 
 parser.add_argument("--accum-step", type=int, required=False, default=4)
 parser.add_argument("--eval-step", type=int, required=False, default=100) 
@@ -35,20 +35,28 @@ args = parser.parse_args()
 if args.save_step is None: args.save_step = 1000
 if args.train_step is None: args.train_step = 10000
 if args.lr_decay_step is None: args.lr_decay_step = 1000
-# different phoneme size unit; require different TIMIT segmentation
-if args.eval_list is None: args.eval_list = "/data/hejung/timit/test_w2v.wav.phone"
+eval_lists = [
+  ("/data/hejung/timit/test_w2v.wav.phone", "none"),
+  ("timit_test_w2v/snr0/test.wav.txt", "snr0"),
+  ("timit_test_w2v/snr10/test.wav.txt", "snr10"),
+  ("timit_test_w2v/snr20/test.wav.txt", "snr20")
+]
 
 import metric
 import soundfile
 import librosa
 
-assert os.path.isfile(args.eval_list)
-evals = [e.strip() for e in open(args.eval_list, "r").readlines()]
-eval_pcms = []
-for idx, pcm_ref in enumerate(evals):
-  _pcm = pcm_ref.split()[0]
-  _pcm, _ = soundfile.read(_pcm)
-  eval_pcms.append(_pcm)
+eval_pcms_list =[]
+for eval_list, eval_name in eval_lists:
+  assert os.path.isfile(eval_list)
+  evals = [e.strip() for e in open(eval_list, "r").readlines()]
+  eval_pcms = []
+  for idx, pcm_ref in enumerate(evals):
+    _pcm = pcm_ref.split()[0]
+    _pcm, _ = soundfile.read(_pcm)
+    eval_pcms.append(_pcm)
+
+  eval_pcms_list.append((eval_pcms, eval_name))
 
 import sys
 import json
@@ -110,6 +118,9 @@ import parse_data
 import glob
 
 tfrec_list = glob.glob(os.path.join(args.tfrec, "train-*.tfrecord"))
+if args.tfrec2 is not None:
+  tfrec_list += glob.glob(os.path.join(args.tfrec2, "train-*.tfrecord"))
+
 dataset = parse_data.gen_train(tfrec_list, 
   samp_len, txt_len, no_spec=True,
   batch_size=args.batch_size, seed=seed)
@@ -158,7 +169,7 @@ if args.profile:
 def run_step(step, pcm, txt,
              samp_len, txt_len,
              training=True, accum=False,
-             stop_grad=False, ssl_fix=False):
+             stop_grad=False):
   with tf.GradientTape(persistent=True) as tape, log_writer.as_default():
     loss = m(
       (pcm, txt, samp_len, txt_len),
@@ -180,17 +191,7 @@ def run_step(step, pcm, txt,
     else:   
       for idx, grad in enumerate(grads):
         if grad is None: continue
-
-        gmask = 1.
-        if grad_mask[idx] is not None: gmask = grad_mask[idx]
-
-        if ssl_fix:
-          accum_grads[idx].assign_add(grad * gmask)
-        else:
-          if args.ssl_preserve_zero:
-            accum_grads[idx].assign_add(grad * (1. - gmask))
-          else:
-            accum_grads[idx].assign_add(grad)
+        accum_grads[idx].assign_add(grad)
 
       if not accum:
         for idx, grad in enumerate(grads):
@@ -206,40 +207,11 @@ def run_step(step, pcm, txt,
   return loss
 
 def run_eval_step(pcm, pcm_len):
-  if not (args.timit or args.speech_command or args.voxceleb):
-    # sample_len-wise inference
-    hyps = []
-    for idx in range(int(np.ceil(pcm_len / samp_len))):
-      _pcm = pcm[:, idx * samp_len : (idx+1) * samp_len]
-      _pcm_len = _pcm.shape[-1]
-
-      if _pcm_len < samp_len:
-        if _pcm_len < 200: continue # if > n_fft//2, error in reflect pad
-
-      _hyp = m(_pcm, training=False)
-      hyps.append(_hyp)
-
-    _hyp = np.concatenate(hyps, 1)
-
-  else:
-    # bulk inference
-    _hyp = m(pcm, training=False)
+  # bulk inference
+  _hyp = m(pcm, training=False)
 
   maxids = np.argmax(np.squeeze(_hyp, 0), -1)
-
-  if args.timit or args.speech_command or args.voxceleb:
-    return [str(e) for e in maxids]
-
-  def greedy(hyp):
-    truns = []; prev = 0
-    for idx in hyp:
-      if idx != prev:
-        if prev != 0: truns.append(prev)
-      prev = idx
-    if prev != 0: truns.append(prev)
-    return tokenizer.decode(truns)
-  
-  return greedy(maxids)
+  return [str(e) for e in maxids]
 
 import logging
 logger = tf.get_logger()
@@ -300,7 +272,7 @@ for idx, data in enumerate(dataset):
   def do_step():
     loss = run_step(
       tf.cast(idx, tf.int64), *_in_arg,
-      accum=accum, stop_grad=args.stop_grad, ssl_fix=ssl_fix)
+      accum=accum, stop_grad=args.stop_grad)
     return loss
 
   if args.profile:
@@ -357,27 +329,25 @@ for idx, data in enumerate(dataset):
     expname = [e for e in args.output.split("/") if len(e) > 0][-1]
     resname = "{}-{}".format(expname, idx)
 
-    with open(os.path.join("results", "{}.eval".format(resname)), "w") as f:
-      for _pcm, pcm_ref in zip(eval_pcms, evals):
-        _pcm_len = _pcm.shape[0]
-        _pcm = np.expand_dims(_pcm, 0).astype(np.float32)
+    for eval_pcms, eval_name in eval_pcms_list:
+      with open(os.path.join("results", "{}_{}.eval".format(resname, eval_name)), "w") as f:
+        for _pcm, pcm_ref in zip(eval_pcms, evals):
+          _pcm_len = _pcm.shape[0]
+          _pcm = np.expand_dims(_pcm, 0).astype(np.float32)
 
-        _ref = [int(e) for e in pcm_ref.split()[1:]]
-        hyp = run_eval_step(_pcm, _pcm_len)
+          _ref = [int(e) for e in pcm_ref.split()[1:]]
+          hyp = run_eval_step(_pcm, _pcm_len)
 
-        if args.timit or args.speech_command or args.voxceleb:
           _per = metric.per([" ".join(hyp)], [" ".join([str(e) for e in _ref])])
-        else:
-          _per = metric.per([hyp], [tokenizer.decode(_ref)])
         
-        pers.append(_per)
-      
-        f.write("{} {}\n".format(_per, " ".join(hyp)))
-        f.flush()
+          pers.append(_per)
+       
+          f.write("{} {}\n".format(_per, " ".join(hyp)))
+          f.flush()
     
-      f.write("final: {}\n".format(np.mean(pers)))
+        f.write("final: {}\n".format(np.mean(pers)))
 
-    logger.info("gstep[{}] per[{:.4f}]".format(idx, np.mean(pers)))
+      logger.info("gstep[{}] type[{}] per[{:.4f}]".format(idx, eval_name, np.mean(pers)))
 
     modelname = "model-{}.ckpt".format(idx)
     modelpath = os.path.join(args.output, modelname)

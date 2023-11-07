@@ -3,17 +3,27 @@ import glob
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
-tfrecs = glob.glob(os.path.join("libriphone_v4", "train-*.tfrecord"))
-data = tf.data.TFRecordDataset(tfrecs)
-
 import soundfile
 import numpy as np
 
-i = 0
-for rec in data.take(3):
+tfrecs = glob.glob(os.path.join("timit_w2v_snr0_v3", "train-0.tfrecord"))
+data = tf.data.TFRecordDataset(tfrecs)
+
+idx = 0
+for rec in data.take(2):
   ex = tf.train.Example()
   ex.ParseFromString(rec.numpy())
-  print(len(ex.features.feature['spec'].float_list.value))
-  #pcm = np.array(list(ex.features.feature['pcm'].float_list.value))
-  #ref = np.array(list(ex.features.feature['ref'].float_list.value))
-  i += 1
+  soundfile.write("snr0_v3_{}.wav".format(idx), ex.features.feature['pcm'].float_list.value, 16000)
+  print(ex.features.feature['pcm_len'])
+  idx += 1
+
+tfrecs = glob.glob(os.path.join("timit_w2v_snr0_v3_jb", "train-0.tfrecord"))
+data = tf.data.TFRecordDataset(tfrecs)
+
+idx = 0
+for rec in data.take(2):
+  ex = tf.train.Example()
+  ex.ParseFromString(rec.numpy())
+  soundfile.write("snr0_v3_jb_{}.wav".format(idx), ex.features.feature['pcm'].float_list.value, 16000)
+  print(ex.features.feature['pcm_len'])
+  idx += 1

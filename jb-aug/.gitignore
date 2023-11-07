@@ -1,2 +1,7 @@
-timit_w2v_snr*/
+timit_w2v_snr*
+timit_test_w2v
 __pycache__/
+exps/
+results/
+*.wav
+wav2vec2_timit.ckpt.*
