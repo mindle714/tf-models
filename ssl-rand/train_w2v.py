@@ -258,11 +258,11 @@ _ref = np.zeros((args.batch_size, txt_len), dtype=np.int32)
 _in_len = np.ones((args.batch_size, 1), dtype=np.int32) * samp_len
 _ref_len = np.ones((args.batch_size, 1), dtype=np.int32) * txt_len
 
-_ = m((_in, _ref, _in_len, _ref_len),
-  training = True, ctc = True)
+_ = m((_in, _ref, _in_len, _ref_len), training = True, ctc = True)
+_ = m((_in, _ref, _in_len, _ref_len), training = True, ctc = True, ssl_loss = True)
 if args.ssl_fix_adapt:
-  _ = m_masked((_in, _ref, _in_len, _ref_len),
-    training = True, ctc = True)
+  _ = m_masked((_in, _ref, _in_len, _ref_len), training = True, ctc = True)
+  _ = m_masked((_in, _ref, _in_len, _ref_len), training = True, ctc = True, ssl_loss = True)
 
 accum_grads = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights]
 if args.ssl_lth_step > 0:
