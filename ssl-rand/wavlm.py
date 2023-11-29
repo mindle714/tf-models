@@ -153,7 +153,8 @@ class attention(tf.keras.layers.Layer):
     gate_a, gate_b = tf.split(
       tf.nn.sigmoid(tf.math.reduce_sum(gate_ab, -1)), 2, axis=-1)
 
-    gate_a_1 = gate_a * (gate_b * self.grep_a - 1.) + 2.
+    grep_a = tf.tile(self.grep_a, [tf.shape(x)[0], 1, 1]) 
+    gate_a_1 = gate_a * (gate_b * grep_a - 1.) + 2.
     rel_bias = gate_a_1 * tf.transpose(rel_bias, [0, 2, 1])
 
     attn_weights = tf.linalg.matmul(q, k, transpose_b=True) * self.scaling
