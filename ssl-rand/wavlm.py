@@ -1,11 +1,31 @@
 import tensorflow as tf
 from util import *
 import mask
+import math
 from tf_seq2seq_losses import classic_ctc_loss as _ctc_loss
 
 tf_sum = tf.math.reduce_sum
 tf_expd = tf.expand_dims
 gelu = tf.keras.activations.gelu
+
+def rel_pos_bucket(rel_pos, bidirec=True, num_buckets=320, max_dist=800):
+  ret = 0
+  n = -rel_pos
+  if bidirec:
+    num_buckets //= 2
+    ret += tf.cast(tf.math.less(n, 0), tf.int32) * num_buckets
+    n = tf.math.abs(n)
+  else:
+    n = tf.math.maximum(n, 0)
+  # n in the range [0, inf)
+  max_exact = num_buckets // 2
+  is_small = tf.math.less(n, max_exact)
+  val_if_large = max_exact + tf.cast(
+    tf.math.log(tf.cast(n, tf.float32) / max_exact)
+    / math.log(max_dist / max_exact) * (num_buckets - max_exact), tf.int32)
+  val_if_large = tf.math.minimum(val_if_large, num_buckets - 1)
+  ret += tf.where(is_small, n, val_if_large)
+  return ret
 
 class gnormconv1d(tf.keras.layers.Layer):
   def __init__(self, *args, **kwargs):
@@ -78,9 +98,10 @@ class posconvemb(tf.keras.layers.Layer):
 
 class attention(tf.keras.layers.Layer):
   def __init__(self, num_heads=12, dim=768, *args, **kwargs):
+    super(attention, self).__init__(*args, **kwargs)
+    
     self.num_heads = num_heads
     self.dim = dim
-    super(attention, self).__init__(*args, **kwargs)
 
   def build(self, input_shape):
     if isinstance(input_shape, tuple):
@@ -95,16 +116,22 @@ class attention(tf.keras.layers.Layer):
     self.v_proj = tf.keras.layers.Dense(self.dim, use_bias=True)
     self.q_proj = tf.keras.layers.Dense(self.dim, use_bias=True)
     self.out_proj = tf.keras.layers.Dense(self.dim, use_bias=True)
+
+    self.grep_linear = tf.keras.layers.Dense(8, use_bias=True)
+    self.grep_a = self.add_weight(
+      shape=(self.num_heads, 1, 1), name="grep_a")
+
     #self.dropout = tf.keras.layers.Dropout(0)
     self.dropout = tf.identity
   
   def call(self, inputs, training=None):
     if isinstance(inputs, tuple):
-      x, attn_mask = inputs
+      x, attn_mask, rel_bias = inputs
 
     else:
       x = inputs
       attn_mask = None
+      rel_bias = None
     
     x_k = x; x_q = x
 
@@ -116,11 +143,22 @@ class attention(tf.keras.layers.Layer):
         tf.concat([[-1], tf.shape(e)[-2:]], 0))
       return e
 
-    q = reshape(self.q_proj(x_q) * self.scaling)
+    q = reshape(self.q_proj(x_q))
     k = reshape(self.k_proj(x_k))
     v = reshape(self.v_proj(x_q))
 
-    attn_weights = tf.linalg.matmul(q, k, transpose_b=True)
+    x_h = reshape(x)
+    gate_ab = self.grep_linear(x_h)
+    gate_ab = tf.reshape(gate_ab, tf.concat([tf.shape(gate_ab)[:2], [2, 4]], 0))
+    gate_a, gate_b = tf.split(
+      tf.nn.sigmoid(tf.math.reduce_sum(gate_ab, -1)), 2, axis=-1)
+
+    gate_a_1 = gate_a * (gate_b * self.grep_a - 1.) + 2.
+    rel_bias = gate_a_1 * tf.transpose(rel_bias, [0, 2, 1])
+
+    attn_weights = tf.linalg.matmul(q, k, transpose_b=True) * self.scaling
+    attn_weights += rel_bias
+
     if attn_mask is not None:
       attn_mask = tf_expd(tf_expd(attn_mask, 1), 1)
       attn_mask = tf.tile(attn_mask, [1, self.num_heads, 1, 1])
@@ -173,13 +211,14 @@ class enclayer(tf.keras.layers.Layer):
 
   def call(self, inputs, training=None):
     if isinstance(inputs, tuple):
-      x, attn_mask = inputs
+      x, attn_mask, rel_bias = inputs
 
     else:
       x = inputs
       attn_mask = None
+      rel_bias = None
 
-    x_attn = self.atten((x, attn_mask))
+    x_attn = self.atten((x, attn_mask, rel_bias))
     x_attn = self.dropout(x_attn)
     x = x + x_attn
     x = self.norm(x)
@@ -190,7 +229,9 @@ class enclayer(tf.keras.layers.Layer):
 class encoder(tf.keras.layers.Layer):
   def __init__(self, num_enc_layer, *args, **kwargs):
     super(encoder, self).__init__(*args, **kwargs)
+
     self.num_enc_layer = num_enc_layer
+    self.num_buckets = 320
 
   def build(self, input_shape):
     self.emb = posconvemb()
@@ -198,6 +239,9 @@ class encoder(tf.keras.layers.Layer):
     #self.dropout = tf.keras.layers.Dropout(0)
     self.dropout = tf.identity
     self.layers = [enclayer() for _ in range(self.num_enc_layer)]
+    
+    self.rel_bias = self.add_weight(
+      shape=(12, self.num_buckets), name="rel_bias")
   
   def call(self, inputs, training=None):
     if isinstance(inputs, tuple):
@@ -212,10 +256,18 @@ class encoder(tf.keras.layers.Layer):
       x = self.norm(x)
       x = self.dropout(x)
 
+    x_max_len = tf.shape(x)[1]
+    rel_pos = tf.reshape(tf.range(x_max_len), (-1, 1)) - \
+            tf.reshape(tf.range(x_max_len), (1, -1))
+    rp_bucket = rel_pos_bucket(rel_pos)
+
+    rel_bias = tf.gather(self.rel_bias, rp_bucket, axis=1)
+    rel_bias = tf.tile(rel_bias, (tf.shape(x)[0], 1, 1)) 
+
     encs = []
     for i, layer in enumerate(self.layers):
       encs.append(x)
-      x = layer((x, attn_mask))
+      x = layer((x, attn_mask, rel_bias))
 
     encs.append(x)
     return encs
@@ -231,18 +283,30 @@ class wavlm(tf.keras.layers.Layer):
   def build(self, input_shape):
     self.fe = featencoder()
     self.fp = featproj()
+
+    self.masked_spec_embed = self.add_weight(
+      shape=(768,), name="masked_spec_embed")
     self.enc = encoder(self.num_enc_layer)
   
   def call(self, inputs, training=None):
-    if isinstance(inputs, tuple) and len(inputs) == 2:
+    mask_time_indices = None
+    attn_mask = None
+
+    if isinstance(inputs, tuple) and len(inputs) == 3:
+      x, mask_time_indices, attn_mask = inputs
+    
+    elif isinstance(inputs, tuple) and len(inputs) == 2:
       x, attn_mask = inputs
 
     else:
       x = inputs
-      attn_mask = None
 
     x = self.fe(tf_expd(x, -1))
     x, x_feat = self.fp(x)
+
+    if mask_time_indices is not None:
+      _mask = tf_expd(mask_time_indices, -1)
+      x = self.masked_spec_embed * _mask + x * (1. - _mask)
 
     encs = self.enc((x, attn_mask))
     return encs, x_feat
@@ -255,7 +319,47 @@ class wavlm_seq(tf.keras.layers.Layer):
   def build(self, input_shape):
     self.wavlm = wavlm(self.num_enc_layer)
 
+    self.final_proj = tf.keras.layers.Dense(256, use_bias=True, name="final_proj")
+    self.labels_embs = self.add_weight(
+      shape=(504, 256), name="labels_embs")
+    
+    self.cossim = tf.keras.losses.CosineSimilarity(axis=-1, reduction='none')
+    self.temperature = 0.1
+
+    self.cce = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True, reduction='none')
+
   def call(self, inputs, training=None):
+    if isinstance(inputs, tuple) and len(inputs) == 4:
+      x, hb_idx, mask_time_indices, attn_mask = inputs
+      
+      encs, _ = self.wavlm((x, mask_time_indices, attn_mask), training=training)
+      x = encs[-1]
+
+      x = self.final_proj(x)
+      qx_feat = tf.gather(self.labels_embs, hb_idx, axis=0)
+
+      neg_qx_feat = tf_expd(tf_expd(self.labels_embs, 1), 1)
+      neg_qx_feat = tf.tile(neg_qx_feat, [1, tf.shape(x)[0], tf.shape(x)[1], 1])
+      
+      qx_logits = -self.cossim(x, tf_expd(qx_feat, 0)) / self.temperature
+      neg_qx_logits = -self.cossim(x, neg_qx_feat) / self.temperature
+
+      neg_is_pos = tf.math.reduce_all(qx_feat == neg_qx_feat, -1)
+      if tf.math.reduce_any(neg_is_pos):
+        neg_qx_logits = tf.where(neg_is_pos,
+          tf.ones_like(neg_qx_logits) * (-np.inf), neg_qx_logits)
+
+      logits = tf.concat([qx_logits, neg_qx_logits], 0)
+      logits = tf.transpose(logits, [2, 1, 0])
+      logits = tf.reshape(logits, [-1, tf.shape(logits)[-1]])
+
+      mask_loss = tf.transpose(mask_time_indices, [1, 0])
+      mask_loss = tf.reshape(mask_loss, [-1])
+      cont_loss = self.cce(tf.zeros_like(mask_loss), logits)
+      cont_loss = tf.math.reduce_sum(cont_loss * mask_loss)
+
+      return cont_loss
+
     if isinstance(inputs, tuple) and len(inputs) == 2:
       x, attn_mask = inputs
 
@@ -270,6 +374,7 @@ class wavlm_phone(tf.keras.layers.Layer):
   def __init__(self, 
                num_enc_layer=12, num_class=74, 
                use_last=False, use_layers=12,
+               mask_prob=0.1, mask_len=10,
                single_output=False,
                *args, **kwargs):
     super(wavlm_phone, self).__init__(*args, **kwargs)
@@ -278,6 +383,9 @@ class wavlm_phone(tf.keras.layers.Layer):
     self.num_class = num_class
     self.use_last = use_last
     self.use_layers = use_layers
+    self.mask_prob = mask_prob
+    self.mask_len = mask_len
+    self.min_masks = 2
     self.single_output = single_output
 
   def build(self, input_shape):
@@ -288,24 +396,50 @@ class wavlm_phone(tf.keras.layers.Layer):
     self.proj = tf.keras.layers.Dense(256, use_bias=True)
     self.linear = tf.keras.layers.Dense(self.num_class, use_bias=True)
     
-  def call(self, inputs, training=None, stop_grad=False, ctc=True):
+  def call(self, inputs, training=None,
+           ssl_loss=False, stop_grad=False, ctc=True,
+           return_feat=False):
     if isinstance(inputs, tuple) and len(inputs) == 4:
-      x, ref, x_len, ref_len = inputs
+      x, ref, _x_len, ref_len = inputs
 
       max_x_len = mask.get_feat_extract_output_length(tf.shape(x)[1])
-      x_len = mask.get_feat_extract_output_length(x_len)
+      x_len = mask.get_feat_extract_output_length(_x_len)
       attn_mask = tf.sequence_mask(tf.squeeze(x_len, -1), max_x_len)
       attn_mask = 1. - tf.cast(attn_mask, dtype=tf.float32)
       attn_mask *= -1e9
 
     else:
       x = inputs
-      x_len = None
+      _x_len = None; x_len = None
       ref = None; ref_len = None
       attn_mask = None
 
+    if ssl_loss:
+      x_feat = x; x_feat_len = _x_len
+      batch_size = x_feat.shape[0]
+      
+      max_x_feat_len = mask.get_feat_extract_output_length(tf.shape(x_feat)[1])
+      x_feat_len = mask.get_feat_extract_output_length(x_feat_len)
+      feat_attn_mask = tf.sequence_mask(tf.squeeze(x_feat_len, -1), max_x_feat_len)
+
+      mask_time_indices = mask.compute_mask_indices(
+        batch_size, max_x_feat_len,
+        tf.cast(feat_attn_mask, tf.int32),
+        self.mask_prob, self.mask_len, self.min_masks)
+        
+      feat_attn_mask = 1. - tf.cast(feat_attn_mask, dtype=tf.float32)
+      feat_attn_mask *= -1e9
+
+      seq_loss = self.wavlm(
+        (x_feat, ref, mask_time_indices, feat_attn_mask), training=training)
+
+      return seq_loss
+
     encs, _ = self.wavlm((x, attn_mask), training=training)
     assert len(encs) == (self.num_enc_layer + 1)
+    
+    if return_feat:
+      return encs
 
     if self.use_last:
       x = encs[-1]

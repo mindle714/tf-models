@@ -307,6 +307,15 @@ class hubert_seq(tf.keras.layers.Layer):
       cont_loss = self.cce(tf.zeros_like(mask_loss), logits)
       cont_loss = tf.math.reduce_sum(cont_loss * mask_loss)
 
+      # Above process is same as
+      # tmp = tf.nn.sparse_softmax_cross_entropy_with_logits(hb_idx, 
+      #   tf.transpose(self.cossim(
+      #     tf_expd(x, 1), tf_expd(tf_expd(self.labels_embs, 0), 2)) / -0.1, 
+      #     [0, 2, 1]))
+      # cont_loss = tf.math.reduce_sum(
+      #   tf.where(mask_loss == 0, 0, tf.reshape(tf.transpose(tmp), [-1])))
+      # However, follow original fairseq implementation which utilizes NCE loss
+
       return cont_loss
 
     if isinstance(inputs, tuple) and len(inputs) == 2:
