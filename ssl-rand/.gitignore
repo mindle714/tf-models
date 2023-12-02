@@ -2,12 +2,16 @@ __pycache__/
 exps/
 results/
 
+timit_hb_feat*/
+timit_pcm/
+
 timit_test/
 timit_test_w2v/
 
-data2vec_timit.ckpt.*
-hubert_timit.ckpt.*
-wavlm_timit.ckpt.*
+wav2vec2_timit*.ckpt.*
+data2vec_timit*.ckpt.*
+hubert_timit*.ckpt.*
+wavlm_timit*.ckpt.*
 
 timit_test_d2v
 timit_test_hb

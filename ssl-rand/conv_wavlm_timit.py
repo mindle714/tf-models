@@ -164,7 +164,8 @@ def run_lth_step(step, pcm, hb_idx,
   return sloss
   
 for idx, data in enumerate(lth_dataset):
-    if idx > 10000: break
+#    if idx > 10000: break
+    if idx > 100000: break
 
     _in_arg = [data["pcm"], data["hb_idx"],
                data["pcm_len"], data["hb_idx_len"]]
@@ -176,4 +177,5 @@ for idx, data in enumerate(lth_dataset):
       print("lth-gstep[{}] loss[{}]".format(idx, loss))
 
 ckpt = tf.train.Checkpoint(model)
-ckpt.write("wavlm_timit_v2.ckpt")
+#ckpt.write("wavlm_timit_v2.ckpt")
+ckpt.write("wavlm_timit_v2_100k.ckpt")
