@@ -15,7 +15,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--tfrec", type=str, required="timit") 
 parser.add_argument("--batch-size", type=int, required=False, default=8) 
 parser.add_argument("--accum-step", type=int, required=False, default=2)
-parser.add_argument("--train-step", type=int, required=False, default=4000) 
+parser.add_argument("--train-step", type=int, required=False, default=2000) 
 parser.add_argument("--eval-step", type=int, required=False, default=50) 
 parser.add_argument("--valid-step", type=int, required=False, default=50) 
 parser.add_argument("--valid-patience", type=int, required=False, default=5) 
@@ -171,7 +171,7 @@ def get_grad_mask(m, ratio):
   return grad_mask
 
 for prune_ratio in [0.1, 0.2, 0.3, 0.4, 0.5]:
-  for rewind in [-200, -100, 0, 100, 200]:
+  for rewind in [-100, -80, -60, -40, -20, 0]:
     m = tera.tera_phone(num_class=50, use_last=True)
 
     opt = tf.keras.optimizers.Adam(learning_rate=args.begin_lr)
@@ -184,7 +184,7 @@ for prune_ratio in [0.1, 0.2, 0.3, 0.4, 0.5]:
 
     if args.accum_step > 1:
       accum_grads = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights] 
-      #accum_grads_lth = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights] 
+      accum_grads_lth = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights] 
 
     m_saved = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights]
     m_saved_set = False
@@ -360,6 +360,7 @@ for prune_ratio in [0.1, 0.2, 0.3, 0.4, 0.5]:
           *_in_arg, accum=accum, neg=False)
 
       quit_by_val = False; val_loss = np.inf
+      '''
       if not (rewind < 0 and (rewind + idx) < 0) and idx % args.valid_step == 0:
         val_loss = get_val_loss(m)
         if prev_val is None or prev_val > val_loss:
@@ -369,6 +370,7 @@ for prune_ratio in [0.1, 0.2, 0.3, 0.4, 0.5]:
 
         if val_cnt >= args.valid_patience:
           quit_by_val = True
+      '''
 
       if idx % args.eval_step == 0:
         logger.info("1st gstep[{}] prune ratio[{}] rewind[{}] loss[{:.3f}] valid loss[{:.3f}]".format(
@@ -423,6 +425,7 @@ for prune_ratio in [0.1, 0.2, 0.3, 0.4, 0.5]:
         m.trainable_weights[w_idx].assign(w_masked)
 
       quit_by_val = False; val_loss = np.inf
+      '''
       if idx % args.valid_step == 0:
         val_loss = get_val_loss(m)
         if prev_val is None or prev_val > val_loss:
@@ -432,6 +435,7 @@ for prune_ratio in [0.1, 0.2, 0.3, 0.4, 0.5]:
 
         if val_cnt >= args.valid_patience:
           quit_by_val = True
+      '''
       
       if idx % args.eval_step == 0:
         logger.info("2nd gstep[{}] prune ratio[{}] rewind[{}] loss[{:.3f}] valid loss[{:.3f}]".format(
