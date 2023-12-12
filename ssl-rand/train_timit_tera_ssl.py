@@ -18,8 +18,10 @@ parser.add_argument("--accum-step", type=int, required=False, default=2)
 parser.add_argument("--train-step", type=int, required=False, default=40000) 
 parser.add_argument("--eval-step", type=int, required=False, default=100) 
 parser.add_argument("--valid-step", type=int, required=False, default=100) 
-parser.add_argument("--valid-patience", type=int, required=False, default=5) 
+parser.add_argument("--valid-patience", type=int, required=False, default=10) 
 parser.add_argument("--begin-lr", type=float, required=False, default=1e-4) 
+parser.add_argument("--lr-decay-rate", type=float, required=False, default=0.96)
+parser.add_argument("--lr-decay-step", type=float, required=False, default=500)
 parser.add_argument("--output", type=str, required=True) 
 parser.add_argument("--warm-start", type=str, required=True, default=None)
 args = parser.parse_args()
@@ -126,8 +128,8 @@ def run_lth_eval_step(step, m,
 
 m = tera.tera_phone(num_class=50, use_last=True)
 
-opt = tf.keras.optimizers.Adam(learning_rate=args.begin_lr)
-opt_lth = tf.keras.optimizers.SGD(learning_rate=args.begin_lr)
+lr = tf.Variable(args.begin_lr, trainable=False)
+opt = tf.keras.optimizers.Adam(learning_rate=lr)
 
 _in = np.zeros((args.batch_size, spec_len, 80), dtype=np.float32)
 _in_len = np.ones((args.batch_size, 1), dtype=np.int32) * spec_len
@@ -135,21 +137,16 @@ _ = m((_in, _in_len), ctc = is_ctc)
 _ = m((_in, _in_len), ctc = is_ctc, ssl_loss = True)
 
 if args.accum_step > 1:
-  accum_grads = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights] 
-  #accum_grads_lth = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights] 
-
-m_saved = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights]
-m_saved_set = False
+  accum_grads = [tf.Variable(tf.zeros_like(e)) for e in m.trainable_weights]
 
 ckpt = tf.train.Checkpoint(m)
 ckpt.read(args.warm_start).assert_consumed()
 
 @tf.function
-def run_lth_step(step, m, 
-                 _opt, accum_grads_v2,
-                 spec, txt,
-                 spec_len, txt_len,
-                 accum=False, neg=True):
+def run_step(step, m, 
+             spec, txt,
+             spec_len, txt_len,
+             accum=False, neg=True):
   with tf.GradientTape(persistent=True) as tape, log_writer.as_default():
     sloss = m(
       (spec, txt, spec_len, txt_len), ssl_loss=True)
@@ -164,103 +161,23 @@ def run_lth_step(step, m,
   grads, _ = tf.clip_by_global_norm(grads, 5.)
     
   if args.accum_step == 1:
-    _opt.apply_gradients(zip(grads, weights))
+    opt.apply_gradients(zip(grads, weights))
 
   else:
     for idx, grad in enumerate(grads):
       if grad is None: continue
-      accum_grads_v2[idx].assign_add(grad)
+      accum_grads[idx].assign_add(grad)
 
     if not accum:
       for idx, grad in enumerate(grads):
         if grad is None: continue
-        accum_grads_v2[idx].assign(accum_grads_v2[idx]/args.accum_step)
+        accum_grads[idx].assign(accum_grads[idx]/args.accum_step)
 
-      _opt.apply_gradients(zip(accum_grads_v2, weights))
+      opt.apply_gradients(zip(accum_grads, weights))
                 
       for idx, grad in enumerate(grads):
         if grad is None: continue
-        accum_grads_v2[idx].assign(tf.zeros_like(grad))
-
-  return sloss
-
-@tf.function
-def run_lth_step_v2(step, m, 
-                 _opt, accum_grads_v2,
-                 spec, txt,
-                 spec_len, txt_len,
-                 accum=False, neg=True):
-  with tf.GradientTape(persistent=True) as tape, log_writer.as_default():
-    sloss = m(
-      (spec, txt, spec_len, txt_len), ssl_loss=True)
-    
-    sloss = tf.math.reduce_mean(sloss)
-    if neg: neg_sloss = -sloss
-    else: neg_sloss = sloss
-    tf.summary.scalar("sloss", sloss, step=step)
-    
-  weights = m.trainable_weights
-  grads = tape.gradient(neg_sloss, weights)
-  grads, _ = tf.clip_by_global_norm(grads, 5.)
-    
-  if args.accum_step == 1:
-    _opt.apply_gradients(zip(grads, weights))
-
-  else:
-    for idx, grad in enumerate(grads):
-      if grad is None: continue
-      accum_grads_v2[idx].assign_add(grad)
-
-    if not accum:
-      for idx, grad in enumerate(grads):
-        if grad is None: continue
-        accum_grads_v2[idx].assign(accum_grads_v2[idx]/args.accum_step)
-
-      _opt.apply_gradients(zip(accum_grads_v2, weights))
-                
-      for idx, grad in enumerate(grads):
-        if grad is None: continue
-        accum_grads_v2[idx].assign(tf.zeros_like(grad))
-
-  return sloss
-
-@tf.function
-def run_lth_step_v3(step, m, 
-                 _opt, accum_grads_v2,
-                 spec, txt,
-                 spec_len, txt_len,
-                 accum=False, neg=True):
-  with tf.GradientTape(persistent=True) as tape, log_writer.as_default():
-    sloss = m(
-      (spec, txt, spec_len, txt_len), ssl_loss=True)
-    
-    sloss = tf.math.reduce_mean(sloss)
-    if neg: neg_sloss = -sloss
-    else: neg_sloss = sloss
-    tf.summary.scalar("sloss", sloss, step=step)
-    
-  weights = m.trainable_weights
-  grads = tape.gradient(neg_sloss, weights)
-  grads, _ = tf.clip_by_global_norm(grads, 5.)
-    
-  if args.accum_step == 1:
-    _opt.apply_gradients(zip(grads, weights))
-
-  else:
-    for idx, grad in enumerate(grads):
-      if grad is None: continue
-      accum_grads_v2[idx].assign_add(grad)
-
-    if not accum:
-      for idx, grad in enumerate(grads):
-        if grad is None: continue
-        accum_grads_v2[idx].assign(accum_grads_v2[idx]/args.accum_step)
-
-      _opt.apply_gradients(zip(accum_grads_v2, weights))
-                
-      for idx, grad in enumerate(grads):
-        if grad is None: continue
-        accum_grads_v2[idx].assign(tf.zeros_like(grad))
+        accum_grads[idx].assign(tf.zeros_like(grad))
 
   return sloss
 
@@ -290,9 +207,8 @@ for idx, data in enumerate(dataset):
   _in_arg = [data["spec"], data["txt"],
              data["spec_len"], data["txt_len"]]
 
-  loss = run_lth_step_v2(
+  loss = run_step(
     tf.cast(idx, tf.int64), m,
-    opt, accum_grads,
     *_in_arg, accum=accum, neg=False)
 
   quit_by_val = False; val_loss = np.inf
@@ -307,12 +223,14 @@ for idx, data in enumerate(dataset):
       quit_by_val = True
 
   if idx % args.eval_step == 0:
-    logger.info("gstep[{}] loss[{:.3f}] valid loss[{:.3f}]".format(
-      idx, np.mean(loss), val_loss))
+    logger.info("gstep[{}] loss[{:.3f}] valid loss[{:.3f}] lr[{:.2e}]".format(
+      idx, np.mean(loss), val_loss, lr.numpy()))
 
   if quit_by_val:
     logger.info("gstep[{}] quit by validation loss".format(idx))
     break
+      
+  lr.assign(args.begin_lr * args.lr_decay_rate**(idx/args.lr_decay_step))
 
 modelname = "model-{}.ckpt".format(idx)
 modelpath = os.path.join(args.output, modelname)
