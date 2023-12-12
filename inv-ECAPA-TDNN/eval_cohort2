@@ -1,0 +1,44 @@
+#!/usr/bin/bash
+
+exp=base_b400; epoch=80
+for num in $(seq 1100 100 5000); do
+  echo "num $num";
+  CUDA_VISIBLE_DEVICES=0 python3 trainECAPAModel.py \
+    --eval_list /data/hejung/vox1/veri_test2.txt \
+    --eval_path /data/sv/vox1/test/wav/ \
+    --eval --initial_model exps/${exp}/model/model_00${epoch}.model \
+    --cohort_path exps/${exp}/model/model_00${epoch}.cohort_full.npy \
+    --as_norm --n_cohort $num \
+    | tee exps/$exp/model-${epoch}-as-norm-nc${num}.txt
+
+  CUDA_VISIBLE_DEVICES=0 python3 trainECAPAModel.py \
+    --eval_list /data/hejung/vox1/veri_test2.txt \
+    --eval_path /data/sv/vox1/test/wav/ \
+    --eval --initial_model exps/${exp}/model/model_00${epoch}.model \
+    --cohort_path exps/${exp}/model/model_00${epoch}.cohort_full.npy \
+    --as_norm --norm_v2 --n_cohort $num \
+    | tee exps/$exp/model-${epoch}-as-norm2-nc${num}.txt
+done
+
+if false; then
+CUDA_VISIBLE_DEVICES=1 python3 trainECAPAModel.py \
+  --eval_list /data/hejung/vox1/veri_test2.txt \
+  --eval_path /data/sv/vox1/test/wav/ \
+  --eval --initial_model exps/pretrain.model \
+  --cohort_path cohort.npy --as_norm --norm_v2 --n_cohort 1000 \
+  > exps/pretrain-as-norm.txt
+
+CUDA_VISIBLE_DEVICES=1 python3 trainECAPAModel.py \
+  --eval_list /data/hejung/vox1/veri_test2.txt \
+  --eval_path /data/sv/vox1/test/wav/ \
+  --eval --initial_model exps/pretrain.model \
+  --cohort_path cohort.npy --as_norm --norm_v2 --n_cohort 400 \
+  > exps/pretrain-nc400-as-norm.txt
+
+CUDA_VISIBLE_DEVICES=1 python3 trainECAPAModel.py \
+  --eval_list /data/hejung/vox1/veri_test2.txt \
+  --eval_path /data/sv/vox1/test/wav/ \
+  --eval --initial_model exps/pretrain.model \
+  --cohort_path cohort.npy --as_norm --norm_v2 --n_cohort 2000 \
+  > exps/pretrain-nc2000-as-norm.txt
+fi

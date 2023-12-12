@@ -1,0 +1,22 @@
+#!/usr/bin/bash
+
+epoch=80
+for exp in base_b400 inv3_params12_b400_maskall; do
+  CUDA_VISIBLE_DEVICES=1 python3 trainECAPAModel.py \
+    --eval_list /data/hejung/vox1/veri_test2.txt \
+    --eval_path /data/sv/vox1/test/wav/ \
+    --eval --initial_model exps/$exp/model/model_00${epoch}.model --as_norm \
+    > exps/$exp/model-${epoch}-as-norm.txt
+
+#  CUDA_VISIBLE_DEVICES=1 python3 trainECAPAModel.py \
+#    --eval_list /data/hejung/vox1/list_test_all2.txt \
+#    --eval_path /data/sv/vox1/dev/wav/ \
+#    --eval --initial_model exps/$exp/model/model_00${epoch}.model --as_norm \
+#    > exps/$exp/model-${epoch}-as-norm-vox-e.txt
+
+#  CUDA_VISIBLE_DEVICES=1 python3 trainECAPAModel.py \
+#    --eval_list /data/hejung/vox1/list_test_hard2.txt \
+#    --eval_path /data/sv/vox1/dev/wav/ \
+#    --eval --initial_model exps/$exp/model/model_00${epoch}.model --as_norm \
+#    > exps/$exp/model-${epoch}-as-norm-vox-h.txt
+done

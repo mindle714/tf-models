@@ -1,0 +1,3 @@
+01-16 19:06:32 Model para number = 14.73
+Model exps/base_b400/model/model_0067.model loaded from previous state!
+EER 0.93%, minDCF 0.0881%
