@@ -1,0 +1,2 @@
+/home/hejung/venv3/bin/python3 train.py --tfrec vbank_demand_28/ --output exps/tera_base3
+{"tfrec": "vbank_demand_28/", "val_tfrec": null, "batch_size": 8, "eval_step": 100, "save_step": 1000, "val_step": 5000, "train_step": 100000, "begin_lr": 0.0001, "lr_decay_rate": 0.96, "lr_decay_step": 2000.0, "val_lr_update": 3, "output": "exps/tera_base3", "warm_start": null, "from_init": false}

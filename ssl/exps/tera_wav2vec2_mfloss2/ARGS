@@ -1,0 +1,2 @@
+/usr/bin/python3 train.py --tfrec vbank_demand_28/ --output exps/tera_wav2vec2_mfloss2 --warm-start tera_wav2vec2_mfloss_base.ckpt --save-step 10000
+{"tfrec": "vbank_demand_28/", "val_tfrec": null, "batch_size": 8, "eval_step": 100, "save_step": 10000, "val_step": 5000, "train_step": 100000, "begin_lr": 0.0001, "lr_decay_rate": 0.96, "lr_decay_step": 2000.0, "val_lr_update": 3, "output": "exps/tera_wav2vec2_mfloss2", "warm_start": "tera_wav2vec2_mfloss_base.ckpt", "from_init": false}

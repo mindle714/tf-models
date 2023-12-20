@@ -1,0 +1,2 @@
+/usr/bin/python3 train.py --tfrec vbank_demand_28/ --output exps/tera_sl3_w1 --warm-start tera_sl.ckpt --ssl-weight 1
+{"tfrec": "vbank_demand_28/", "val_tfrec": null, "batch_size": 8, "eval_step": 100, "save_step": 10000, "val_step": 5000, "train_step": 100000, "begin_lr": 0.0001, "lr_decay_rate": 0.96, "lr_decay_step": 2000.0, "val_lr_update": 3, "ssl_weight": 1.0, "begin_ssl": 0, "end_ssl": 100000, "output": "exps/tera_sl3_w1", "warm_start": "tera_sl.ckpt", "from_init": false}

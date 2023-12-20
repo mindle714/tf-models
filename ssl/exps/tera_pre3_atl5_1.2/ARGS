@@ -1,0 +1,2 @@
+/usr/bin/python3 train.py --tfrec vbank_demand_28/ --output exps/tera_pre3_atl5_1.2 --warm-start tera_base3.ckpt --save-step 10000 --weight-pow 1.2
+{"tfrec": "vbank_demand_28/", "val_tfrec": null, "batch_size": 8, "eval_step": 100, "save_step": 10000, "val_step": 5000, "train_step": 100000, "begin_lr": 0.0001, "lr_decay_rate": 0.96, "lr_decay_step": 2000.0, "val_lr_update": 3, "lr_beta": 0.99, "weight_pow": 1.2, "output": "exps/tera_pre3_atl5_1.2", "warm_start": "tera_base3.ckpt", "from_init": false}
