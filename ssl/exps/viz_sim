@@ -1,0 +1,16 @@
+#!/usr/bin/bash
+
+smooth=20
+paste <(cat tera_dbg5/train.log | grep gstep | tr '][' ' ' | awk '{print $12}' | awk -vsm=$smooth 'BEGIN{s=0} NR%sm!=0{s+=$1} NR%sm==0{s+=$1; print s/sm; s=0}') \
+  <(cat tera_fs_dbg5/train.log | grep gstep | tr '][' ' ' | awk '{print $12}' | awk -vsm=$smooth 'BEGIN{s=0} NR%sm!=0{s+=$1} NR%sm==0{s+=$1; print s/sm; s=0}') \
+  <(cat tera_fs_dbg5_p2/train.log | grep gstep | tr '][' ' ' | awk '{print $12}' | awk -vsm=$smooth 'BEGIN{s=0} NR%sm!=0{s+=$1} NR%sm==0{s+=$1; print s/sm; s=0}') \
+  <(cat tera_fs_dbg5_p3/train.log | grep gstep | tr '][' ' ' | awk '{print $12}' | awk -vsm=$smooth 'BEGIN{s=0} NR%sm!=0{s+=$1} NR%sm==0{s+=$1; print s/sm; s=0}') \
+  > tera_dbg5.sim
+
+if false; then
+smooth=20
+paste <(cat tera_dbg5_v2/train.log | tr '][' ' ' | awk '{print $12}' | awk -vsm=$smooth 'BEGIN{s=0} NR%sm!=0{s+=$1} NR%sm==0{s+=$1; print s/sm; s=0}') \
+  <(cat tera_fs_dbg5_v2/train.log | tr '][' ' ' | awk '{print $12}' | awk -vsm=$smooth 'BEGIN{s=0} NR%sm!=0{s+=$1} NR%sm==0{s+=$1; print s/sm; s=0}') > tera_dbg5_v2.sim
+fi
+
+python3 viz_sim.py
