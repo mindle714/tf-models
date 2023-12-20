@@ -1,0 +1,3 @@
+01-19 09:56:50 Model para number = 14.73
+Model exps/pretrain.model loaded from previous state!
+EER 0.91%, minDCF 0.0673%

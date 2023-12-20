@@ -1,0 +1,1000 @@
+ 1064  git log .
+ 1065  git pull origin master
+ 1066  cd ../cmgan/
+ 1067  l
+ 1068  cd ../ssl
+ 1069  l
+ 1070  clear
+ 1071  l
+ 1072  git status .
+ 1073  rm pcm_1.wav 
+ 1074  rm pcm_t_1.wav 
+ 1075  l
+ 1076  git status .
+ 1077  git diff req-3.10.txt
+ 1078  git checkout -- req-3.10.txt
+ 1079  git diff req.txt
+ 1080  git checkout -- req.txt
+ 1081  git status .
+ 1082  git diff estat
+ 1083  vi estat 
+ 1084  nvidia-smi
+ 1085  watch -n1 nvidia-smi
+ 1086  exit
+ 1087  l
+ 1088  clear
+ 1089  tmux ls
+ 1090  tmux
+ 1091  jobs
+ 1092  exit
+ 1093  nvidia-smi
+ 1094  ps -p 2292833 -f -www
+ 1095  exit
+ 1096  ps -p 602923 -f -www
+ 1097  exit
+ 1098  source venv3/bin/activate
+ 1099  cd tf-models/ssl
+ 1100  cat exps/pdb/ARGS 
+ 1101  python3 train.py --tfrec vbank_demand_28/ --output exps/pdb --eval-step 1
+ 1102  nvidia-smi
+ 1103  CUDA_VISIBLE_DEVICES=3 python3 train.py --tfrec vbank_demand_28/ --output exps/pdb --eval-step 1
+ 1104  exit
+ 1105  watch -n1 nvidia-smi
+ 1106  df -h
+ 1107  exit
+ 1108  cd tf-models/ssl
+ 1109  l
+ 1110  exit
+ 1111  nvidia-smi
+ 1112  source venv3/bin/ac
+ 1113  source venv3/bin/activate
+ 1114  tmux ls
+ 1115  tmux
+ 1116  clear
+ 1117  l
+ 1118  tmux ls
+ 1119  tmux
+ 1120  exit
+ 1121  nvidia-smi
+ 1122  watch -n1 nvidia-smi
+ 1123  exit
+ 1124  l
+ 1125  tmux ls
+ 1126  tmux
+ 1127  cd /data/hejung/
+ 1128  l
+ 1129  scp -r local:/data/hejung/automix_musdb .
+ 1130  l
+ 1131  ls -ahtlr
+ 1132  cd ../
+ 1133  l
+ 1134  cd hejung/
+ 1135  cd ../
+ 1136  ls -ahtlr
+ 1137  su speech
+ 1138  exit
+ 1139  l
+ 1140  cd demucs/
+ 1141  l
+ 1142  git status .
+ 1143  exit
+ 1144  df -h
+ 1145  cd /data/hejung/
+ 1146  ps -ef | grep scp
+ 1147  scp -r local:/data/hejung/musdb18hq .
+ 1148  exit
+ 1149  cd /data/hejung/
+ 1150  scp -r local:/data/hejung/automix_musdb .
+ 1151  exit
+ 1152  ssh local
+ 1153  exit
+ 1154  ssh local
+ 1155  exit
+ 1156  which python3
+ 1157  python3
+ 1158  virtualenv venv3.8-demucs
+ 1159  su speech
+ 1160  virtualenv venv3.8-demucs
+ 1161  rm -rf venv3.8-demucs/
+ 1162  virtualenv venv3.8-demucs -p python3
+ 1163  source venv3.8-demucs/bin/activate
+ 1164  git clone https://github.com/facebookresearch/demucs.git
+ 1165  cd demucs/
+ 1166  git checkout v3
+ 1167  l
+ 1168  tar xvf outputs.tar.gz 
+ 1169  clear
+ 1170  l
+ 1171  pip3 install -r requirements.txt 
+ 1172  clear
+ 1173  l
+ 1174  git branch
+ 1175  cd 
+ 1176  clear
+ 1177  l
+ 1178  cd demucs/
+ 1179  l
+ 1180  du -sh .
+ 1181  git status .
+ 1182  cd outputs/
+ 1183  l
+ 1184  tree
+ 1185  cd ../../
+ 1186  cd -
+ 1187  l
+ 1188  cd ../
+ 1189  git remote set-url origin https://github.com/mindle714/demucs.git
+ 1190  git branch
+ 1191  git pull
+ 1192  git log .
+ 1193  clear
+ 1194  l
+ 1195  dirs
+ 1196  pushd /data/hejung/automix_musdb/
+ 1197  l
+ 1198  du -sh .
+ 1199  clear
+ 1200  l
+ 1201  exit
+ 1202  tmux ls
+ 1203  tmux attach
+ 1204  tmux ls
+ 1205  exit
+ 1206  tmux ls
+ 1207  exit
+ 1208  ps -ef | grep dora
+ 1209  exit
+ 1210  su speech
+ 1211  exit
+ 1212  ps -ef | grep python3
+ 1213  ps -ef | grep python3 | grep hejung
+ 1214  clear
+ 1215  ps -ef | grep python3 | grep hejung
+ 1216  clear
+ 1217  exit
+ 1218  ssh local
+ 1219  exit
+ 1220  tmux ls
+ 1221  tmux
+ 1222  exit
+ 1223  su speech
+ 1224  cd demucs/
+ 1225  l
+ 1226  cd demucs_inv/
+ 1227  clear
+ 1228  l
+ 1229  vi solver.py 
+ 1230  grep -rn inplace -I
+ 1231  vi apply.py 
+ 1232  vi solver.py 
+ 1233  exit
+ 1234  nvidia-smi
+ 1235  clear
+ 1236  l
+ 1237  source venv3.8-demucs/bin/activate
+ 1238  l
+ 1239  clear
+ 1240  l
+ 1241  cd demucs/
+ 1242  l
+ 1243  git status .
+ 1244  git log .
+ 1245  l
+ 1246  git pull
+ 1247  l
+ 1248  cd demucs
+ 1249  cd ../
+ 1250  cd demucs_inv/
+ 1251  l
+ 1252  scp local:/home/hejung/demucs/demucs_inv/solver.py .
+ 1253  git status .
+ 1254  pip3 install -U dora-search
+ 1255  cd ../
+ 1256  l
+ 1257  python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch=[0.9, 0.95] ema.batch=[0.9995, 0.9999] seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16
+ 1258  clear
+ 1259  nvidia-smi
+ 1260  CUDA_VISIBLE_DEVICES=3 python3 -m dora -p demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=Fa
+ 1261  CUDA_VISIBLE_DEVICES=3 python3 -m dora -p demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch=[0.9, 0.95] ema.batch=[0.9995, 0.9999] seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16
+ 1262  CUDA_VISIBLE_DEVICES=3 python3 -m dora -p demucs_inv --main_module train run -- hdemucs.channels=16
+ 1263  CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.channels=16
+ 1264  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.channels=16
+ 1265  clear
+ 1266  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.channels=16
+ 1267  vi conf/config.yaml 
+ 1268  grep -rn "\<transform_target\>" -I
+ 1269  vi -R demucs/hdemucs.py 
+ 1270  vi -R conf/config.yaml 
+ 1271  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.channels=16
+ 1272  vi conf/config.yaml 
+ 1273  nvidia-smi
+ 1274  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- "hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch=[0.9, 0.95] ema.batch=[0.9995, 0.9999] seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16"
+ 1275  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- 'hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch=[0.9, 0.95] ema.batch=[0.9995, 0.9999] seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16'
+ 1276  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16
+ 1277  clear
+ 1278  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16
+ 1279  clear
+ 1280  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16
+ 1281  clear
+ 1282  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16
+ 1283  vi demucs_inv/train.py 
+ 1284  CUDA_VISIBLE_DEVICES=3 python3 -m pdb demucs_inv/train.py 
+ 1285  exit
+ 1286  cd demucs/
+ 1287  l
+ 1288  vi conf/config.yaml 
+ 1289  grep -rn "\<segment\>" -I
+ 1290  vi -R demucs_inv/train.py 
+ 1291  vi -R demucs_inv/hdemucs.py 
+ 1292  vi -R demucs_inv/demucs.py 
+ 1293  vi -R demucs_inv/train.py 
+ 1294  clear
+ 1295  ps -ef | grep hejung | grep python
+ 1296  ls -ahtlr
+ 1297  find . -name mix1.wav
+ 1298  cd outputs/xps/2ab49645/
+ 1299  l
+ 1300  ls -ahtlr
+ 1301  scp mix*wav local:/home/hejung/tmp
+ 1302  ls -ahtlr
+ 1303  scp *wav local:/home/hejung/tmp
+ 1304  ps -ef | grep hejung 
+ 1305  nvidia-smi
+ 1306  watch -n1 nvidia-smi
+ 1307  watch -n1 nvidia-smi -i 3
+ 1308  exit
+ 1309  python3
+ 1310  ssh local
+ 1311  exit
+ 1312  tmux ls
+ 1313  tmux attach
+ 1314  exit
+ 1315  cd demucs/demucs_inv/
+ 1316  vi train.py 
+ 1317  exit
+ 1318  cd tmp/
+ 1319  l
+ 1320  cat ~/demucs/.git/config 
+ 1321  cd 
+ 1322  exit
+ 1323  tmux ls
+ 1324  tmux
+ 1325  exit
+ 1326  ssh local
+ 1327  exit
+ 1328  cd CM
+ 1329  ssh local
+ 1330  exit
+ 1331  ssh local
+ 1332  cd demucs/
+ 1333  cd demucs_inv/
+ 1334  vi solver.py 
+ 1335  exit
+ 1336  tmux ls
+ 1337  tmux attach
+ 1338  exit
+ 1339  tmux ls
+ 1340  tmux attach
+ 1341  exit
+ 1342  tmux ls
+ 1343  tmux attach
+ 1344  exit
+ 1345  tmux ls
+ 1346  tmux attach
+ 1347  exit
+ 1348  tmux ls
+ 1349  tmux attach
+ 1350  tmux ls
+ 1351  tmux attach
+ 1352  exit
+ 1353  ps -ef | grep dora
+ 1354  cd demucs/
+ 1355  cd outputs/
+ 1356  tree
+ 1357  find . -type f -printf "%T@ %p\n"
+ 1358  find . -type f -printf "%T@ %p\n" | sort -k1 -n
+ 1359  cd xps/82d4752f/
+ 1360  l
+ 1361  vi -R train.log 
+ 1362  cat train.log 
+ 1363  date
+ 1364  tail -f train.log 
+ 1365  clear
+ 1366  tail -f train.log 
+ 1367  date
+ 1368  tail -f train.log 
+ 1369  date
+ 1370  clear
+ 1371  date
+ 1372  tail -f train.log 
+ 1373  cd ../
+ 1374  exit
+ 1375  python3
+ 1376  cd demucs/demucs_inv/
+ 1377  git diff hdemucs.py
+ 1378  vi hdemucs.py 
+ 1379  clear
+ 1380  vi hdemucs.py 
+ 1381  clear
+ 1382  vi hdemucs.py 
+ 1383  clear
+ 1384  vi hdemucs.py 
+ 1385  git diff .
+ 1386  git status .
+ 1387  vi solver.py 
+ 1388  vi hdemucs.py 
+ 1389  vi solver.py 
+ 1390  vi train.py 
+ 1391  vi ../conf/config.yaml 
+ 1392  clear
+ 1393  htop
+ 1394  nvidia-smi
+ 1395  htop
+ 1396  exit
+ 1397  python3
+ 1398  cd demucs/demucs_inv/
+ 1399  vi solver.py 
+ 1400  clear
+ 1401  git diff solver.py
+ 1402  git diff hdemucs.py
+ 1403  git status .
+ 1404  git diff solver.py
+ 1405  git status .
+ 1406  git diff solver.py
+ 1407  clear
+ 1408  ps -ef | grep dora
+ 1409  git status .
+ 1410  cd ../
+ 1411  git status .
+ 1412  git diff .
+ 1413  exit
+ 1414  cd demucs/demucs_inv/
+ 1415  l
+ 1416  vi solver.py 
+ 1417  cd ../
+ 1418  l
+ 1419  clear
+ 1420  l
+ 1421  git branch
+ 1422  vi -R README.md 
+ 1423  l
+ 1424  cd outputs/
+ 1425  l
+ 1426  cd ../
+ 1427  l
+ 1428  git branch
+ 1429  git status .
+ 1430  cd demucs
+ 1431  l
+ 1432  cd ../demucs_inv/
+ 1433  l
+ 1434  ls -ahtlr
+ 1435  cd ../
+ 1436  rm -rf demucs_inv/
+ 1437  l
+ 1438  git status .
+ 1439  l
+ 1440  cd conf/
+ 1441  l
+ 1442  vi -R config.yaml 
+ 1443  vi config.yaml 
+ 1444  vi dset/auto_mus.yaml 
+ 1445  vi ../tools/automix.py 
+ 1446  cd ../
+ 1447  l
+ 1448  cp -r demucs demucs_inv
+ 1449  cd demucs_inv/
+ 1450  l
+ 1451  scp local:/home/hejung/demucs/demucs_inv/solver.py solver.py.bak
+ 1452  vimdiff solver.py solver.py.bak 
+ 1453  cd ../outputs/
+ 1454  l
+ 1455  tree
+ 1456  l
+ 1457  cd ../
+ 1458  rm -rf outputs
+ 1459  tar xvf outputs.tar.gz 
+ 1460  cd outputs/
+ 1461  l
+ 1462  cd xps/
+ 1463  l
+ 1464  cd ../../
+ 1465  cd demucs_inv/
+ 1466  vi solver.py
+ 1467  vi ../conf/config.yaml 
+ 1468  clear
+ 1469  vi ../conf/config.yaml 
+ 1470  l
+ 1471  vi solver.py
+ 1472  rm -rf __pycache__/
+ 1473  l
+ 1474  clear
+ 1475  l
+ 1476  cd ..
+ 1477  l
+ 1478  cd demucs_inv/
+ 1479  l
+ 1480  cd ../
+ 1481  l
+ 1482  cd outputs/
+ 1483  l
+ 1484  tree
+ 1485  cd ../
+ 1486  rm -rf outputs
+ 1487  l
+ 1488  tar xvf outputs.tar.gz 
+ 1489  clear
+ 1490  cd demucs_inv/
+ 1491  l
+ 1492  vi hdemucs.py 
+ 1493  vi solver.py 
+ 1494  python3
+ 1495  vi ../conf/config.yaml 
+ 1496  exit
+ 1497  nvidia-smi
+ 1498  watch -n1 nvidia-smi
+ 1499  watch -n1 nvidia-smi -i 3
+ 1500  cd demucs/demucs_inv/
+ 1501  l
+ 1502  vi solver.py 
+ 1503  vi hdemucs.py 
+ 1504  watch -n1 nvidia-smi -i 3
+ 1505  exit
+ 1506  l
+ 1507  source venv3.8-demucs/bin/activate
+ 1508  clear
+ 1509  l
+ 1510  cd demucs/
+ 1511  l
+ 1512  clear
+ 1513  l
+ 1514  cd demucs_inv/
+ 1515  l
+ 1516  history | grep dora
+ 1517  clear
+ 1518  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16
+ 1519  cd ..
+ 1520  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16
+ 1521  cd demucs_inv/
+ 1522  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 train.py -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16
+ 1523  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 train.py 
+ 1524  cd ..
+ 1525  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 
+ 1526  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16
+ 1527  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 hdemucs.depth=1
+ 1528  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 hdemucs.depth=2
+ 1529  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 hdemucs.depth=4
+ 1530  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 
+ 1531  clear
+ 1532  l
+ 1533  git branch
+ 1534  git checkout v4
+ 1535  git checkout main
+ 1536  git diff demucs_inv/solver.py
+ 1537  git status .
+ 1538  git add demucs_inv/solver.py 
+ 1539  git commit
+ 1540  git config --global core.editor "vim"
+ 1541  git commit
+ 1542  git push 
+ 1543  git branch
+ 1544  git checkout main
+ 1545  git status .
+ 1546  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 
+ 1547  pip3 install einops
+ 1548  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 
+ 1549  git branch
+ 1550  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- htdemucs.norm_starts=999 htdemucs.cac=False test.split=True valid_apply=True model=htdemucs htdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 htdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 htdemucs.channels=16 
+ 1551  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- htdemucs.channels=16 
+ 1552  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- htdemucs.norm_starts=999 htdemucs.cac=False test.split=True valid_apply=True model=htdemucs ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 htdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 htdemucs.channels=16 
+ 1553  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- htdemucs.norm_starts=999 htdemucs.cac=False test.split=True valid_apply=True model=htdemucs ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 htdemucs.channels=16 
+ 1554  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- htdemucs.norm_starts=999 htdemucs.cac=False test.split=True valid_apply=True model=htdemucs ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 htdemucs.channels=16 batch_size=4
+ 1555  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- htdemucs.norm_starts=999 htdemucs.cac=False test.split=True valid_apply=True model=htdemucs ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 htdemucs.channels=16 batch_size=1
+ 1556  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- htdemucs.norm_starts=999 htdemucs.cac=False test.split=True valid_apply=True model=htdemucs ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 htdemucs.channels=8 batch_size=4
+ 1557  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- htdemucs.norm_starts=999 htdemucs.cac=False test.split=True valid_apply=True model=htdemucs ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 htdemucs.channels=4 batch_size=4
+ 1558  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- htdemucs.norm_starts=999 htdemucs.cac=False test.split=True valid_apply=True model=htdemucs ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 htdemucs.channels=16 batch_size=1 htdemucs.depth=2
+ 1559  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- htdemucs.norm_starts=999 htdemucs.cac=False test.split=True valid_apply=True model=htdemucs ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 htdemucs.channels=16 batch_size=4 htdemucs.depth=2
+ 1560  git branch
+ 1561  git status .
+ 1562  git diff .
+ 1563  git status .
+ 1564  git diff .
+ 1565  git status .
+ 1566  git add .
+ 1567  git status .
+ 1568  git commit
+ 1569  git status .
+ 1570  git checkout v3
+ 1571  git log .
+ 1572  date
+ 1573  history | grep dora
+ 1574  clear
+ 1575  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16
+ 1576  clear
+ 1577  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16
+ 1578  clear
+ 1579  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16
+ 1580  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=8
+ 1581  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=4
+ 1582  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16
+ 1583  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=True svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 hdemucs.hybrid=False
+ 1584  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=False svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 hdemucs.hybrid=False
+ 1585  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=False svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 hdemucs.hybrid=False hdemucs.emb_smooth=False
+ 1586  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=False svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 hdemucs.hybrid=False hdemucs.emb_smooth=False hdemucs.freq_emb=0
+ 1587  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=False svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 hdemucs.hybrid=False hdemucs.emb_smooth=False hdemucs.freq_emb=0 hdemucs.rescale=0
+ 1588  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=False svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 hdemucs.hybrid=False hdemucs.emb_smooth=False hdemucs.freq_emb=0 hdemucs.rescale=0 hdemucs.rewrite=False
+ 1589  clear
+ 1590  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=False svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 hdemucs.hybrid=False hdemucs.emb_smooth=False hdemucs.freq_emb=0 hdemucs.rescale=0 hdemucs.rewrite=False
+ 1591  clear
+ 1592  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=False svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 hdemucs.hybrid=False hdemucs.emb_smooth=False hdemucs.freq_emb=0 hdemucs.rescale=0 hdemucs.rewrite=False
+ 1593  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=False svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 hdemucs.hybrid=False hdemucs.emb_smooth=False hdemucs.freq_emb=0 hdemucs.rescale=0 hdemucs.rewrite=False hdemucs.cac=True
+ 1594  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=False svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 hdemucs.hybrid=False hdemucs.emb_smooth=False hdemucs.freq_emb=0 hdemucs.rescale=0 hdemucs.cac=True
+ 1595  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=False svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 hdemucs.hybrid=False hdemucs.emb_smooth=False hdemucs.freq_emb=0 hdemucs.rescale=0 hdemucs.rewrite=False hdemucs.cac=True
+ 1596  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=False svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 hdemucs.hybrid=False hdemucs.emb_smooth=False hdemucs.freq_emb=0 hdemucs.rewrite=False hdemucs.cac=True
+ 1597  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=False svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 hdemucs.hybrid=False hdemucs.emb_smooth=False hdemucs.rewrite=False hdemucs.cac=True
+ 1598  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=False svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 hdemucs.hybrid=False hdemucs.rewrite=False hdemucs.cac=True
+ 1599  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=False svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 hdemucs.rewrite=False hdemucs.cac=True
+ 1600  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=False svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 hdemucs.hybrid=False hdemucs.rewrite=False hdemucs.cac=True
+ 1601  clear
+ 1602  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=False svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 hdemucs.hybrid=False hdemucs.rewrite=False hdemucs.cac=True
+ 1603  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=False svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=24 hdemucs.hybrid=False hdemucs.rewrite=False hdemucs.cac=True
+ 1604  clear
+ 1605  LD_LIBRARY_PATH= CUDA_VISIBLE_DEVICES=3 python3 -m dora -P demucs_inv --main_module train run -- hdemucs.norm_starts=999 hdemucs.cac=False test.split=True valid_apply=True model=hdemucs hdemucs.dconv_lstm=4 ema.epoch="[0.9, 0.95]" ema.batch="[0.9995, 0.9999]" seed=42 hdemucs.hybrid_old=False svd=base svd.penalty=1e-05 svd.dim=100 svd.convtr=True optim.lr=0.0005 hdemucs.channels=16 hdemucs.hybrid=False hdemucs.rewrite=False hdemucs.cac=True
+ 1606  exit
+ 1607  cd tmp/
+ 1608  l
+ 1609  git clone https://github.com/mindle714/icml2023.git
+ 1610  tmux ls
+ 1611  exit
+ 1612  tmux ls
+ 1613  exit
+ 1614  cd demucs/
+ 1615  l
+ 1616  git status .
+ 1617  git branch
+ 1618  cd 
+ 1619  l
+ 1620  cd /data/
+ 1621  l
+ 1622  cd sv/
+ 1623  l
+ 1624  clear
+ 1625  l
+ 1626  cd vox1/
+ 1627  l
+ 1628  nvidia-smi
+ 1629  clear
+ 1630  source ~/venv3.8-demucs/bin/activate
+ 1631  l
+ 1632  cd 
+ 1633  cd demucs/outputs/
+ 1634  l
+ 1635  cd ../
+ 1636  l
+ 1637  history
+ 1638  history > HISTORY
+ 1639  vi -R HISTORY 
+ 1640  exit
+ 1641  cd demucs/outputs/xps/82d4752f
+ 1642  ls -ahtlr
+ 1643  exit
+ 1644  l
+ 1645  source venv3.8-demucs/bin/activate
+ 1646  clear
+ 1647  l
+ 1648  cd demucs/
+ 1649  l
+ 1650  clear
+ 1651  l
+ 1652  cd outputs/
+ 1653  l
+ 1654  cd ../
+ 1655  cd outputs/
+ 1656  ls -ahtlr
+ 1657  tree
+ 1658  cd xps/82d4752f/
+ 1659  l
+ 1660  ls -ahltr
+ 1661  vi -R train.log 
+ 1662  cat train.log 
+ 1663  exit
+ 1664  clear
+ 1665  l
+ 1666  source venv3.8-demucs/bin/activate
+ 1667  l
+ 1668  clear
+ 1669  l
+ 1670  cd demucs/
+ 1671  l
+ 1672  cd 
+ 1673  tmux ls
+ 1674  tmux attach
+ 1675  tmux ls
+ 1676  tmux 
+ 1677  exit
+ 1678  cd /data/
+ 1679  l
+ 1680  cd hejung/
+ 1681  l
+ 1682  cd speech-commands
+ 1683  l
+ 1684  tree
+ 1685  cd train/
+ 1686  l
+ 1687  cd ../
+ 1688  l
+ 1689  cd test/
+ 1690  l
+ 1691  cd ../
+ 1692  exit
+ 1693  cd tmp/icml2023/
+ 1694  l
+ 1695  vi -R cifar10.py 
+ 1696  exit
+ 1697  tmux ls
+ 1698  tmux
+ 1699  exit
+ 1700  cd tmp/icml2023/
+ 1701  git diff cifar10.py
+ 1702  vi -R cifar10.py 
+ 1703  vi cifar10.py 
+ 1704  vi -R exps/cifar10_f1000_me17_seed20_clip_cache/train.log 
+ 1705  python3 viz_log.py 
+ 1706  python3 viz_log.py --log exps/cifar10_f1000_me17_seed20_clip_cache/train.log 
+ 1707  source ~/venv3/bin/ac
+ 1708  source ~/venv3/bin/activate
+ 1709  python3 viz_log.py --log exps/cifar10_f1000_me17_seed20_clip_cache/train.log 
+ 1710  vi cifar10.py 
+ 1711  ./trainstat 
+ 1712  clear
+ 1713  ./trainstat 
+ 1714  python3 cifar10.py --init-factor 1000 --mask-epoch 17 --output exps/cifar10_f1000_me17_seed20_clip_cache_alpha0.5 --num-seeds 20 --cache-delta
+ 1715  clear
+ 1716  python3 cifar10.py --init-factor 1000 --mask-epoch 17 --output exps/cifar10_f1000_me17_seed20_clip_cache_alpha0.5 --num-seeds 20 --cache-delta --cache-alpha 0.5
+ 1717  exit
+ 1718  tmux ls
+ 1719  tmux attach
+ 1720  tmux ls
+ 1721  tmux attach
+ 1722  exit
+ 1723  l
+ 1724  nvidia-smi
+ 1725  exit
+ 1726  ssh local
+ 1727  exit
+ 1728  source venv3/bin/ac
+ 1729  source venv3/bin/activate
+ 1730  nvidia-smi
+ 1731  cd tmp/icml2023/
+ 1732  l
+ 1733  CUDA_VISIBLE_DEVICES=3 python3 -m pdb cifar10.py --init-factor 1000 --mask-epoch 17 --output exps/pdb --num-seed 20
+ 1734  clear
+ 1735  CUDA_VISIBLE_DEVICES=3 python3 -m pdb cifar10.py --init-factor 1000 --mask-epoch 17 --output exps/pdb --num-seed 20
+ 1736  nvidia-smi
+ 1737  cd exps/
+ 1738  l
+ 1739  ls -ahtlr
+ 1740  l
+ 1741  cd ..
+ 1742  CUDA_VISIBLE_DEVICES=3 python3 -m pdb cifar10.py --init-factor 1000 --mask-epoch 17 --output exps/pdb --num-seed 20 --cache-delta
+ 1743  ls -ahtlr exps/
+ 1744  exit
+ 1745  ssh local
+ 1746  source venv3/bin/activate
+ 1747  cd tmp/icml2023/
+ 1748  python3 viz_log.py --log exps/cifar10_f1000_me17_seed20_clip_cache/train.log 
+ 1749  python3 viz_log.py --log exps/cifar10_f1000_me17_seed20_clip_cache_alpha0.5/train.log 
+ 1750  python3 viz_log.py --log exps/cifar10_f1000_me17_seed20_clip_cache_alpha1.0/train.log 
+ 1751  nvidia-smi
+ 1752  ls -ahtlr exps/
+ 1753  git diff cifar10.py
+ 1754  exit
+ 1755  cd tmp/icml2023/
+ 1756  l
+ 1757  vi -R cifar10.py 
+ 1758  source ~/venv3/bin/ac
+ 1759  source ~/venv3/bin/activate
+ 1760  clear
+ 1761  python3 viz_log.py 
+ 1762  python3 viz_log.py --log exps/cifar10_f1000_me17_seed20_clip_cache/train.log 
+ 1763  python3 viz_log.py --log exps/cifar10_f1000_me17_seed20_clip_cache_alpha0.5/train.log 
+ 1764  python3 viz_log.py --log exps/cifar10_f1000_me17_seed20_clip_cache_alpha1.0/train.log 
+ 1765  for log in exps/cifar10_f1000_me17_seed20_clip_cache*/train.log; do python3 viz_log.py --log $log; done
+ 1766  for log in exps/cifar10_f1000_me17_seed20_clip_cache*/train.log; do printf "$log "; python3 viz_log.py --log $log; done
+ 1767  clear
+ 1768  for log in exps/cifar10_*/train.log; do printf "$log "; python3 viz_log.py --log $log; done
+ 1769  exit
+ 1770  watch -n1 nvidia-smi -i 3
+ 1771  cd tmp/icml2023/
+ 1772  l
+ 1773  cd exps/l
+ 1774  cd exps/
+ 1775  l
+ 1776  rm -rf cifar10_f1000_me17_seed20_clip_cache_alpha0.5/
+ 1777  l
+ 1778  cd ../
+ 1779  ./trainstat 
+ 1780  clear
+ 1781  ./trainstat 
+ 1782  watch -n1 nvidia-smi -i 3
+ 1783  vi -R exps/cifar10_f1000_me17_seed20_clip_cache/train.log 
+ 1784  python3 viz_log.py --log exps/cifar10_f1000_me17_seed20_clip_cache/train.log 
+ 1785  source ~/venv3/bin/ac
+ 1786  source ~/venv3/bin/activate
+ 1787  clear
+ 1788  python3 viz_log.py --log exps/cifar10_f1000_me17_seed20_clip_cache/train.log 
+ 1789  python3 viz_log.py --log exps/cifar10_f1000_me17_seed20_clip_cache_alpha0.5/train.log 
+ 1790  python3 viz_log.py --log exps/cifar10_f1000_me17_seed20_clip_cache/train.log 
+ 1791  python3 viz_log.py --log exps/cifar10_f1000_me17_seed20_clip_cache_alpha0.5/train.log 
+ 1792  vi cifar10.py 
+ 1793  python3 viz_log.py --log exps/cifar10_f1000_me17_seed20_clip_cache_alpha0.5/train.log 
+ 1794  python3 viz_log.py --log exps/cifar10_f1000_me17_seed20_clip_cache/train.log 
+ 1795  python3 viz_log.py --log exps/cifar10_f1000_me17_seed20_clip_cache_alpha0.5/train.log 
+ 1796  python3 viz_log.py --log exps/cifar10_f1000_me17_seed20_clip_cache/train.log 
+ 1797  clear
+ 1798  nvidia-smi -i 3
+ 1799  nvidia-smi 
+ 1800  clear
+ 1801  ./trainstat 
+ 1802  clear
+ 1803  python3 cifar10.py --init-factor 1000 --mask-epoch 17 --output exps/cifar10_f1000_me17_seed20_clip_cache_alpha1.0 --num-seeds 20 --cache-delta --cache-alpha 1.0
+ 1804  exit
+ 1805  source venv3/bin/ac
+ 1806  source venv3/bin/activate
+ 1807  pip3 freeze
+ 1808  cd tmp/
+ 1809  l
+ 1810  cd icml2023/
+ 1811  cd ic
+ 1812  clea
+ 1813  clear
+ 1814  l
+ 1815  sha1sum cifar10.py
+ 1816  vi cifar10.py 
+ 1817  git status .
+ 1818  vi cifar10.py 
+ 1819  clear
+ 1820  vi cifar10.py 
+ 1821  clear
+ 1822  CUDA_VISIBLE_DEVICES=3 python3 cifar10.py --init-factor 1000 --mask-epoch 17 --output exps/cifar10_f1000_me17_seed20_clip_cache --num-seeds 20 --cache-delta
+ 1823  CUDA_VISIBLE_DEVICES=3 python3 cifar10.py --init-factor 1000 --mask-epoch 17 --output exps/pdb --num-seeds 20 
+ 1824  vi -R cifar10_viz.py 
+ 1825  vi -R cifar10.py 
+ 1826  CUDA_VISIBLE_DEVICES=3 python3 cifar10.py --init-factor 1000 --mask-epoch 17 --output exps/cifar10_f1000_me17_seed20_clip_cache --num-seeds 20 --cache-delta
+ 1827  CUDA_VISIBLE_DEVICES=3 python3 cifar10.py --init-factor 0 --output exps/cifar10_base_seed20 --num-seeds 20 
+ 1828  exit
+ 1829  tmux ls
+ 1830  tmux attach
+ 1831  tmux ls
+ 1832  tmux
+ 1833  ssh t2
+ 1834  exit
+ 1835  cd /data/
+ 1836  l
+ 1837  cd hejung/
+ 1838  l
+ 1839  clear
+ 1840  l
+ 1841  pwd
+ 1842  l
+ 1843  cd vox2/
+ 1844  l
+ 1845  du -sh .
+ 1846  exit
+ 1847  ssh t2
+ 1848  exit
+ 1849  l
+ 1850  clear
+ 1851  l
+ 1852  df -h
+ 1853  clear
+ 1854  l
+ 1855  exit
+ 1856  l
+ 1857  df -h
+ 1858  cd /data/
+ 1859  l
+ 1860  cd wsko/
+ 1861  l
+ 1862  cd SV/
+ 1863  l
+ 1864  cd voxceleb_trainer/
+ 1865  l
+ 1866  cd ../../
+ 1867  l
+ 1868  du -d1 -h
+ 1869  su speech
+ 1870  exit
+ 1871  tmux ls
+ 1872  tmux attach
+ 1873  exit
+ 1874  cd /data/
+ 1875  l
+ 1876  cd sv/
+ 1877  l
+ 1878  cd vox2/
+ 1879  l
+ 1880  cd dev/
+ 1881  l
+ 1882  cd aac/
+ 1883  l
+ 1884  cd id04606/
+ 1885  l
+ 1886  cd eFaUr6_uFso/
+ 1887  l
+ 1888  clear
+ 1889  l
+ 1890  cd ../../../
+ 1891  l
+ 1892  cd ../
+ 1893  l
+ 1894  du -sh .
+ 1895  cd -
+ 1896  l
+ 1897  cd aac/id04606/eFaUr6_uFso
+ 1898  l
+ 1899  sha1sum 00245.wav
+ 1900  cd ../../../
+ 1901  l
+ 1902  cd ../
+ 1903  l
+ 1904  vi -R vox2_list.txt 
+ 1905  cd path/
+ 1906  l
+ 1907  tree
+ 1908  cd ../
+ 1909  l
+ 1910  cd test/
+ 1911  l
+ 1912  cd ../
+ 1913  l
+ 1914  readlink -f dev/
+ 1915  exit
+ 1916  df -h
+ 1917  df -h | awk '{print $6}'
+ 1918  cd /data/
+ 1919  l
+ 1920  cd sv/
+ 1921  l
+ 1922  cd vox2/
+ 1923  l
+ 1924  cd ../
+ 1925  l
+ 1926  cd vox2/
+ 1927  l
+ 1928  cd ../
+ 1929  l
+ 1930  cd musan_split/
+ 1931  l
+ 1932  tree
+ 1933  cd ../
+ 1934  l
+ 1935  cd vox2/
+ 1936  l
+ 1937  cd test/
+ 1938  l
+ 1939  cd aac/
+ 1940  l
+ 1941  cd ../../../
+ 1942  cd vox1/
+ 1943  l
+ 1944  cd test/
+ 1945  l
+ 1946  cd wav/
+ 1947  l
+ 1948  cd ../../
+ 1949  du -sh .
+ 1950  l
+ 1951  cd path/
+ 1952  l
+ 1953  cd ../test/
+ 1954  l
+ 1955  cd wav/
+ 1956  l
+ 1957  du -sh .
+ 1958  cd ../
+ 1959  l
+ 1960  pwd
+ 1961  l
+ 1962  d -sh .
+ 1963  du -sh .
+ 1964  l
+ 1965  clear
+ 1966  ssh t2
+ 1967  exit
+ 1968  df -h
+ 1969  cd /data/
+ 1970  l
+ 1971  cd sv/
+ 1972  l
+ 1973  cd musan_split/
+ 1974  l
+ 1975  cd music/
+ 1976  l
+ 1977  cd ../
+ 1978  cd noise/
+ 1979  l
+ 1980  cd ../
+ 1981  l
+ 1982  clear
+ 1983  l
+ 1984  exit
+ 1985  cd /data/
+ 1986  l
+ 1987  cd sv/
+ 1988  l
+ 1989  cd ../
+ 1990  ll
+ 1991  df -h
+ 1992  l
+ 1993  cd 
+ 1994  l
+ 1995  scp -r local:/home/hejung/ECAPA-TDNN/ .
+ 1996  l
+ 1997  cd ECAPA-TDNN/
+ 1998  l
+ 1999  nvidia-smi
+ 2000  exit
+ 2001  cd /data/
+ 2002  l
+ 2003  cd sv/
+ 2004  l
+ 2005  cd vox2/
+ 2006  l
+ 2007  cd 
+ 2008  cd /data/hejung/
+ 2009  l
+ 2010  clear
+ 2011  l
+ 2012  cd ../
+ 2013  l
+ 2014  cd sv/
+ 2015  l
+ 2016  clear
+ 2017  cd musan_split/
+ 2018  l
+ 2019  pwd
+ 2020  clear
+ 2021  l
+ 2022  cd ../
+ 2023  l
+ 2024  cd vox1/
+ 2025  cd ../../hejung/
+ 2026  l
+ 2027  cd vox1/
+ 2028  l
+ 2029  scp local:/data/hejung/vox1/veri_test2.txt .
+ 2030  cd ../vox2/
+ 2031  scp local:/data/hejung/vox2/train_list.txt .
+ 2032  clear
+ 2033  l
+ 2034  cd 
+ 2035  source venv3.8-demucs/bin/activate
+ 2036  clear
+ 2037  cd inv-ECAPA-TDNN/
+ 2038  l
+ 2039  vi -R inv_trainECAPAModel.py 
+ 2040  vi -R inv_ECAPAModel.py 
+ 2041  clear
+ 2042  l
+ 2043  CUDA_VISIBLE_DEVICES=0 python3 trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/base_b300 --batch_size 300
+ 2044  vi trainECAPAModel.py 
+ 2045  git diff trainECAPAModel.py
+ 2046  git checkout -- trainECAPAModel.py
+ 2047  git status .
+ 2048  git diff ECAPAModel.py
+ 2049  l
+ 2050  clear
+ 2051  CUDA_VISIBLE_DEVICES=0 python3 trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/base_b300 --batch_size 300
+ 2052  vi ECAPAModel.py 
+ 2053  CUDA_VISIBLE_DEVICES=0 python3 trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/base_b300 --batch_size 300
+ 2054  CUDA_VISIBLE_DEVICES=0 python3 trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/base_b400 --batch_size 400
+ 2055  vi ECAPAModel.py 
+ 2056  vi model.py 
+ 2057  vi ECAPAModel.py 
+ 2058  vi model.py 
+ 2059  vi ECAPAModel.py 
+ 2060  git diff ECAPAModel.py
+ 2061  clear
+ 2062  CUDA_VISIBLE_DEVICES=0 python3 trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/base_b400 --batch_size 400
+ 2063  history > HISTORY_0

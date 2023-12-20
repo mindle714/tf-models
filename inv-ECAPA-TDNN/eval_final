@@ -1,0 +1,60 @@
+#!/usr/bin/bash
+
+eval_vox1() {
+  local exp=$1
+  local epoch=$2
+  local nc=$3
+
+  CUDA_VISIBLE_DEVICES=3 python3 trainECAPAModel.py \
+    --eval_list /data/hejung/vox1/veri_test2.txt \
+    --eval_path /data/sv/vox1/test/wav/ \
+    --eval --initial_model exps/${exp}/model/model_00${epoch}.model \
+    --cohort_path exps/${exp}/model/model_00${epoch}.cohort_full.npy \
+    --as_norm --n_cohort $num --norm_v2 \
+    | tee exps/$exp/model-${epoch}-as-norm2-nc${num}.txt
+}
+
+eval_vox1_e() {
+  local exp=$1
+  local epoch=$2
+  local nc=$3
+
+  CUDA_VISIBLE_DEVICES=3 python3 trainECAPAModel.py \
+    --eval_list /data/hejung/vox1/list_test_all2.txt \
+    --eval_path /data/sv/vox1/dev/wav/ \
+    --eval --initial_model exps/${exp}/model/model_00${epoch}.model \
+    --cohort_path exps/${exp}/model/model_00${epoch}.cohort_full.npy \
+    --as_norm --n_cohort $num --norm_v2 \
+    | tee exps/$exp/model-${epoch}-as-norm2-nc${num}-vox-e.txt
+}
+
+eval_vox1_h() {
+  local exp=$1
+  local epoch=$2
+  local nc=$3
+
+  CUDA_VISIBLE_DEVICES=3 python3 trainECAPAModel.py \
+    --eval_list /data/hejung/vox1/list_test_hard2.txt \
+    --eval_path /data/sv/vox1/dev/wav/ \
+    --eval --initial_model exps/${exp}/model/model_00${epoch}.model \
+    --cohort_path exps/${exp}/model/model_00${epoch}.cohort_full.npy \
+    --as_norm --n_cohort $num --norm_v2 \
+    | tee exps/$exp/model-${epoch}-as-norm2-nc${num}-vox-h.txt
+}
+
+exp=base_b400; epoch=80; num=1000
+eval_vox1 $exp $epoch $num
+eval_vox1_e $exp $epoch $num
+eval_vox1_h $exp $epoch $num
+
+exp=inv3_params12_b400_maskall; epoch=79; num=1000
+eval_vox1 $exp $epoch $num
+eval_vox1_e $exp $epoch $num
+eval_vox1_h $exp $epoch $num
+
+if false; then
+exp=inv4_params12_b400_f1000_cont; epoch=78; num=1000
+eval_vox1 $exp $epoch $num
+eval_vox1_e $exp $epoch $num
+eval_vox1_h $exp $epoch $num
+fi

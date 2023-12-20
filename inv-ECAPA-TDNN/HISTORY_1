@@ -1,0 +1,47 @@
+ 1093  vi -R inv_trainECAPAModel.py 
+ 1108  vi inv_trainECAPAModel.py 
+ 1111  vi inv_trainECAPAModel.py 
+ 1113  vi inv_trainECAPAModel.py 
+ 1118  vi inv_trainECAPAModel.py 
+ 1120  vi inv_trainECAPAModel.py 
+ 1124  CUDA_VISIBLE_DEVICES=3 python3 inv_trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/inv2_pa
+ 1135  CUDA_VISIBLE_DEVICES=2 python3 inv_trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/inv2_params12_b400_f1000 --batch_size 400 --init_factor 1000
+ 1223  cp ../../inv_trainECAPAModel.py .
+ 1228  cp ../../inv_trainECAPAModel.py .
+ 1270  vi -R ../inv_trainECAPAModel.py 
+ 1283  vi inv_trainECAPAModel.py 
+ 1540  vi -R inv_trainECAPAModel.py 
+ 1584  vi -R inv_trainECAPAModel.py 
+ 1767  vi -R inv_trainECAPAModel.py 
+ 1802  ps -ef | grep inv_train
+ 1806  cp ../inv_ECAPAModel.py ../inv_trainECAPAModel.py inv2_params12_b400/
+ 1807  cp ../inv_ECAPAModel.py ../inv_trainECAPAModel.py inv2_params12_b400_f1000/
+ 1811  ps -ef | grep inv_train
+ 1813  ps -ef | grep inv_train
+ 1814  CUDA_VISIBLE_DEVICES=0 python3 inv_trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/inv3_params12_b400 --batch_size 400 
+ 1816  CUDA_VISIBLE_DEVICES=0 python3 inv_trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/inv4_params12_b400_f1000 --batch_size 400 --init_factor 1000
+ 1831  vi inv_trainECAPAModel.py 
+ 1833  vi inv_trainECAPAModel.py 
+ 1836  CUDA_VISIBLE_DEVICES=3 python3 inv_trainECAPAModel.py --train_list /data/hejung/vox2/dummy --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/pdb --batch_size 400
+ 1838  CUDA_VISIBLE_DEVICES=3 python3 inv_trainECAPAModel.py --train_list /data/hejung/vox2/dummy --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/pdb --batch_size 400
+ 1846  CUDA_VISIBLE_DEVICES=3 python3 inv_trainECAPAModel.py --train_list /data/hejung/vox2/dummy --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/pdb --batch_size 400
+ 1847  CUDA_VISIBLE_DEVICES=3 python3 inv_trainECAPAModel.py --train_list /data/hejung/vox2/dummy --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/pdb --batch_size 400 --initial_model exps/pdb/model/model_0001.model --initial_state exps/pdb/model/model_0001.optim 
+ 1849  vi -R inv_trainECAPAModel.py 
+ 1867  CUDA_VISIBLE_DEVICES=1 python3 inv_trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/inv4_params12_b400 --batch_size 400
+ 1890  CUDA_VISIBLE_DEVICES=3 python3 inv_trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/inv_params12_b200 --batch_size 200
+ 1893  CUDA_VISIBLE_DEVICES=3 python3 inv_trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/inv_params12_b200 --batch_size 200
+ 1895  CUDA_VISIBLE_DEVICES=3 python3 inv_trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/inv_params12_b200 --batch_size 200
+ 1900  CUDA_VISIBLE_DEVICES=3 python3 inv_trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/inv_params12_b200 --batch_size 200
+ 1903  CUDA_VISIBLE_DEVICES=3 python3 inv_trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/inv_params12_b200 --batch_size 200
+ 1908  CUDA_VISIBLE_DEVICES=3 python3 inv_trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/inv_params12_b200 --batch_size 200
+ 1909  CUDA_VISIBLE_DEVICES=3 python3 inv_trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/inv_params12_b200 --batch_size 300
+ 1915  CUDA_VISIBLE_DEVICES=3 python3 inv_trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/inv_params12_b300 --batch_size 300
+ 1917  CUDA_VISIBLE_DEVICES=3 python3 inv_trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/inv_params12_b400 --batch_size 400
+ 1919  CUDA_VISIBLE_DEVICES=3 python3 inv_trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/inv_params12_b400 --batch_size 400
+ 1923  cp inv_ECAPAModel.py inv_trainECAPAModel.py exps/inv_params12_b400/
+ 1927  vimdiff inv_trainECAPAModel.py ~/inv-ECAPA-TDNN.dbg/inv_trainECAPAModel.py 
+ 1928  vi inv_trainECAPAModel.py 
+ 1930  CUDA_VISIBLE_DEVICES=3 python3 inv_trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/inv2_params12_b400 --batch_size 400
+ 1931  CUDA_VISIBLE_DEVICES=3 python3 inv_trainECAPAModel.py --train_list /data/hejung/vox2/train_list.txt --train_path /data/sv/vox2/dev/aac/ --eval_list /data/hejung/vox1/veri_test2.txt --eval_path /data/sv/vox1/test/wav/ --musan_path /data/sv/musan_split/ --rir_path /data/sv/RIRS_NOISES/simulated_rirs/ --save_path exps/inv3_params12_b400_f1000 --batch_size 400 --init_factor 1000
+ 2004  history | grep inv_train
+ 2005  history | grep inv_train > HISTORY_1

@@ -1,0 +1,3 @@
+01-16 15:52:39 Model para number = 14.73
+Model exps/inv3_params12_b400_maskall/model/model_0062.model loaded from previous state!
+EER 0.82%, minDCF 0.0828%

@@ -1,0 +1,3 @@
+01-21 16:07:42 Model para number = 14.73
+Model exps/inv4_params12_b400_f1000_cont/model/model_0078.model loaded from previous state!
+EER 1.22%, minDCF 0.1407%

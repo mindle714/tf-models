@@ -1,0 +1,3 @@
+#!/usr/bin/bash
+
+ps -ef | grep ECAPA | grep -o "python3.*" | sort | uniq
